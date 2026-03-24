@@ -28,7 +28,6 @@ export const TestScreen: React.FC<Props> = ({ navigation }) => {
   const [currentEar, setCurrentEar]   = useState<Ear>('right');
   const [phase, setPhase]             = useState<string>('idle');
   const [completedSteps, setCompletedSteps] = useState(0);
-  const [countdown, setCountdown]     = useState<number | null>(null);
   const [earSwitchMsg, setEarSwitchMsg] = useState(false);
 
   const totalSteps = TEST_FREQUENCIES.length * 2; // 14
@@ -60,17 +59,8 @@ export const TestScreen: React.FC<Props> = ({ navigation }) => {
           setPhase(s.phase);
           break;
         }
-        case 'tone_start':
-          setCountdown(null);
-          break;
-        case 'tone_end':
-          break;
-        case 'countdown':
-          setCountdown(event.seconds);
-          break;
         case 'threshold_found':
           setCompletedSteps(prev => prev + 1);
-          setCountdown(null);
           break;
         case 'ear_complete':
           if (event.ear === 'right') {
@@ -159,14 +149,7 @@ export const TestScreen: React.FC<Props> = ({ navigation }) => {
       {/* 단계 안내 */}
       <Text style={styles.phaseText}>{phaseLabel[phase] ?? phase}</Text>
 
-      {/* 카운트다운 */}
-      <View style={styles.countdownBox}>
-        {countdown !== null && countdown > 0 ? (
-          <Text style={styles.countdownText}>{countdown}</Text>
-        ) : (
-          <View style={styles.countdownPlaceholder} />
-        )}
-      </View>
+      {/* 카운트다운 제거 - 시각 단서 차단 */}
 
       {/* 반응 버튼 */}
       <TouchableOpacity
@@ -242,18 +225,6 @@ const styles = StyleSheet.create({
   progressText: { fontSize: 12, color: '#546e7a', textAlign: 'center', marginTop: 4 },
 
   phaseText: { fontSize: 13, color: '#78909c', marginBottom: 8 },
-
-  // 카운트다운
-  countdownBox: {
-    height: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  countdownText: {
-    fontSize: 40, fontWeight: 'bold', color: '#42a5f5',
-  },
-  countdownPlaceholder: { height: 40 },
 
   // 반응 버튼
   responseButton: {
