@@ -1,18 +1,26 @@
 import { TestFrequency, Ear, TestResult, TEST_FREQUENCIES, AudiometricState } from '../types';
 import { ToneGenerator } from './ToneGenerator';
-import { CalibrationManager, dbHLToAmplitude } from './CalibrationManager';
 
-const TONE_DURATION_MS = 1000;
-const MIN_DB = -10;
-const MAX_DB = 120;
+/**
+ * 간소화된 순음 청력 검사 엔진
+ *
+ * 각 주파수마다:
+ *  1) 40 dB HL로 순음 재생 (1.5초)
+ *  2) 반응 창 2.5초 대기
+ *  3) 반응 있으면 → 역치 = 40 dB, 다음 주파수
+ *  4) 반응 없으면 → 20 dB 올려서 재시도 (최대 100 dB)
+ *  5) 100 dB에서도 무반응 → 역치 = 100 dB (고도 난청)
+ *
+ * 우측 귀 7개 → 좌측 귀 7개 → 결과 화면
+ */
 
-// Descend 10 dB on response, ascend 5 dB on no-response
-const STEP_DOWN = 10;
-const STEP_UP = 5;
+const TONE_DURATION_MS = 1500;
+const RESPONSE_WINDOW_MS = 2500; // 순음 재생 후 응답 대기 시간
+const ISI_MS = 1200;             // 순음 간 간격 (Inter-Stimulus Interval)
 
-// Threshold confirmed when 2 out of 3 ascending responses at same level
-const THRESHOLD_RESPONSES_NEEDED = 2;
-const THRESHOLD_TRIALS_NEEDED = 3;
+const START_DB = 40;
+const STEP_UP = 20;
+const MAX_DB = 100;
 
 export type EngineEvent =
   | { type: 'tone_start'; frequency: number; dbHL: number }
@@ -21,24 +29,20 @@ export type EngineEvent =
   | { type: 'ear_complete'; ear: Ear }
   | { type: 'test_complete'; result: TestResult }
   | { type: 'noise_warning' }
-  | { type: 'state_update'; state: AudiometricState };
+  | { type: 'state_update'; state: AudiometricState }
+  | { type: 'countdown'; seconds: number };
 
 export class AudiometricEngine {
   private toneGen: ToneGenerator;
-  private calibration: CalibrationManager;
   private state: AudiometricState;
   private listener: ((event: EngineEvent) => void) | null = null;
   private isPaused = false;
   private isRunning = false;
-  private toneTimer: ReturnType<typeof setTimeout> | null = null;
   private responseReceived = false;
-
-  // Ascending run tracking per level
-  private ascendingLevelResponses: Map<number, { responses: number; trials: number }> = new Map();
+  private abortController: AbortController = new AbortController();
 
   constructor() {
     this.toneGen = new ToneGenerator();
-    this.calibration = new CalibrationManager();
     this.state = this.createInitialState();
   }
 
@@ -46,8 +50,8 @@ export class AudiometricEngine {
     return {
       currentEar: 'right',
       currentFrequency: 125,
-      currentDb: 50,
-      phase: 'idle',
+      currentDb: START_DB,
+      phase: 'familiarization',
       ascendingResponses: [],
       trialCount: 0,
       results: { right: {}, left: {}, date: new Date().toISOString() },
@@ -58,10 +62,6 @@ export class AudiometricEngine {
     this.listener = listener;
   }
 
-  getCalibrationManager() {
-    return this.calibration;
-  }
-
   getState(): AudiometricState {
     return { ...this.state };
   }
@@ -70,210 +70,184 @@ export class AudiometricEngine {
     this.listener?.(event);
   }
 
+  // ── 외부 제어 ──────────────────────────────────────────
+
   async start() {
+    this.abortController = new AbortController();
     this.state = this.createInitialState();
     this.isRunning = true;
     this.isPaused = false;
-    this.state.phase = 'familiarization';
-    this.state.currentFrequency = 125;
-    this.state.currentDb = 50;
-    this.ascendingLevelResponses.clear();
+    this.responseReceived = false;
     this.emit({ type: 'state_update', state: this.getState() });
-    await this.runNextTrial();
+    await this.runAllFrequencies();
   }
 
   pause() {
     this.isPaused = true;
     this.toneGen.stop();
-    if (this.toneTimer) {
-      clearTimeout(this.toneTimer);
-      this.toneTimer = null;
-    }
   }
 
   resume() {
     if (!this.isRunning) return;
     this.isPaused = false;
-    setTimeout(() => this.runNextTrial(), 500);
+    // 일시 정지 후 다시 실행은 현재 주파수부터 재시작
+    this.runAllFrequencies();
   }
 
   stop() {
     this.isRunning = false;
-    this.isPaused = false;
+    this.abortController.abort();
     this.toneGen.stop();
-    if (this.toneTimer) {
-      clearTimeout(this.toneTimer);
-    }
   }
 
-  // Called when user presses response button
+  /** 사용자가 버튼/스페이스바를 눌렀을 때 호출 */
   onUserResponse() {
     if (!this.isRunning || this.isPaused) return;
     this.responseReceived = true;
   }
 
-  private async runNextTrial() {
-    if (!this.isRunning || this.isPaused) return;
-
-    const { currentFrequency, currentDb, phase, currentEar } = this.state;
-
-    // Clamp dB
-    const clampedDb = Math.max(MIN_DB, Math.min(MAX_DB, currentDb));
-    this.state.currentDb = clampedDb;
-
-    // Random inter-stimulus interval 1-2.5 seconds to prevent button mashing
-    const isi = 1000 + Math.random() * 1500;
-    await this.delay(isi);
-
-    if (!this.isRunning || this.isPaused) return;
-
-    // Play tone
-    this.responseReceived = false;
-    const amplitude = dbHLToAmplitude(clampedDb, currentFrequency, this.calibration.getCalibration());
-    this.emit({ type: 'tone_start', frequency: currentFrequency, dbHL: clampedDb });
-    this.emit({ type: 'state_update', state: this.getState() });
-
-    await this.toneGen.playTone(currentFrequency, TONE_DURATION_MS, Math.max(0.001, amplitude), currentEar);
-    this.emit({ type: 'tone_end' });
-
-    // Response window: 1.5 seconds after tone
-    await this.delay(1500);
-
-    if (!this.isRunning || this.isPaused) return;
-
-    const responded = this.responseReceived;
-    this.responseReceived = false;
-
-    await this.processResponse(responded);
-  }
-
-  private async processResponse(responded: boolean) {
-    if (!this.isRunning) return;
-    const { phase, currentFrequency, currentDb, currentEar } = this.state;
-
-    if (phase === 'familiarization') {
-      if (responded) {
-        // Start descending phase
-        this.state.phase = 'descending';
-        this.state.currentDb = currentDb - STEP_DOWN;
-        this.ascendingLevelResponses.clear();
-      } else {
-        // Increase by 20 dB until heard
-        this.state.currentDb = Math.min(MAX_DB, currentDb + 20);
-      }
-      this.emit({ type: 'state_update', state: this.getState() });
-      await this.runNextTrial();
-      return;
-    }
-
-    if (phase === 'descending') {
-      if (responded) {
-        // Keep descending
-        this.state.currentDb = currentDb - STEP_DOWN;
-      } else {
-        // Switch to ascending
-        this.state.phase = 'ascending';
-        this.state.currentDb = currentDb + STEP_UP;
-        this.ascendingLevelResponses.clear();
-      }
-      this.emit({ type: 'state_update', state: this.getState() });
-      await this.runNextTrial();
-      return;
-    }
-
-    if (phase === 'ascending') {
-      const dbKey = currentDb;
-      if (!this.ascendingLevelResponses.has(dbKey)) {
-        this.ascendingLevelResponses.set(dbKey, { responses: 0, trials: 0 });
-      }
-      const entry = this.ascendingLevelResponses.get(dbKey)!;
-      entry.trials++;
-      if (responded) entry.responses++;
-
-      if (responded) {
-        // Check threshold condition: 2+ of 3 responses at same level
-        if (entry.responses >= THRESHOLD_RESPONSES_NEEDED && entry.trials >= THRESHOLD_TRIALS_NEEDED) {
-          // Threshold found!
-          const dbHL = currentDb;
-          this.state.phase = 'threshold_found';
-          this.state.results[currentEar][currentFrequency] = dbHL;
-          this.emit({ type: 'threshold_found', ear: currentEar, frequency: currentFrequency, dbHL });
-          await this.delay(500);
-          await this.moveToNextFrequency();
-          return;
-        } else if (entry.trials < THRESHOLD_TRIALS_NEEDED) {
-          // Need more trials at this level
-          await this.runNextTrial();
-          return;
-        } else {
-          // Not enough responses, descend again then ascend
-          this.state.phase = 'descending';
-          this.state.currentDb = currentDb - STEP_DOWN;
-          await this.runNextTrial();
-          return;
-        }
-      } else {
-        // No response: go up 5 dB
-        this.state.currentDb = currentDb + STEP_UP;
-        if (this.state.currentDb > MAX_DB) {
-          // Can't go higher, mark as no response
-          this.state.results[currentEar][currentFrequency] = MAX_DB;
-          this.emit({ type: 'threshold_found', ear: currentEar, frequency: currentFrequency, dbHL: MAX_DB });
-          await this.moveToNextFrequency();
-          return;
-        }
-        this.ascendingLevelResponses.clear();
-        this.emit({ type: 'state_update', state: this.getState() });
-        await this.runNextTrial();
-        return;
-      }
-    }
-  }
-
-  private async moveToNextFrequency() {
-    const { currentEar, currentFrequency } = this.state;
-    const freqIndex = TEST_FREQUENCIES.indexOf(currentFrequency);
-    this.ascendingLevelResponses.clear();
-
-    if (freqIndex < TEST_FREQUENCIES.length - 1) {
-      // Next frequency for current ear
-      const nextFreq = TEST_FREQUENCIES[freqIndex + 1];
-      this.state.currentFrequency = nextFreq;
-      this.state.currentDb = 50; // Reset to 50 dB
-      this.state.phase = 'familiarization';
-      this.emit({ type: 'state_update', state: this.getState() });
-      await this.delay(1000);
-      await this.runNextTrial();
-    } else {
-      // Current ear done
-      this.emit({ type: 'ear_complete', ear: currentEar });
-
-      if (currentEar === 'right') {
-        // Switch to left ear
-        this.state.currentEar = 'left';
-        this.state.currentFrequency = 125;
-        this.state.currentDb = 50;
-        this.state.phase = 'familiarization';
-        this.emit({ type: 'state_update', state: this.getState() });
-        await this.delay(2000);
-        await this.runNextTrial();
-      } else {
-        // Both ears done
-        this.state.phase = 'complete';
-        this.isRunning = false;
-        this.emit({ type: 'test_complete', result: this.state.results });
-      }
-    }
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      this.toneTimer = setTimeout(resolve, ms);
-    });
-  }
-
   dispose() {
     this.stop();
     this.toneGen.dispose();
+  }
+
+  // ── 내부 검사 루프 ──────────────────────────────────────
+
+  private async runAllFrequencies() {
+    const ears: Ear[] = ['right', 'left'];
+
+    for (const ear of ears) {
+      if (!this.isRunning) return;
+      this.state.currentEar = ear;
+
+      for (const freq of TEST_FREQUENCIES) {
+        if (!this.isRunning) return;
+
+        // 일시정지 해제 대기
+        while (this.isPaused) {
+          await this.sleep(200);
+          if (!this.isRunning) return;
+        }
+
+        this.state.currentFrequency = freq;
+        this.state.currentDb = START_DB;
+        this.state.phase = 'familiarization';
+        this.emit({ type: 'state_update', state: this.getState() });
+
+        const threshold = await this.testOneFrequency(ear, freq);
+        if (!this.isRunning) return;
+
+        this.state.results[ear][freq] = threshold;
+        this.state.phase = 'threshold_found';
+        this.emit({ type: 'threshold_found', ear, frequency: freq, dbHL: threshold });
+        this.emit({ type: 'state_update', state: this.getState() });
+
+        await this.sleep(600);
+      }
+
+      this.emit({ type: 'ear_complete', ear });
+      if (ear === 'right') {
+        // 귀 전환 전 2초 대기 + 안내
+        this.state.phase = 'idle';
+        this.emit({ type: 'state_update', state: this.getState() });
+        await this.sleep(2000);
+      }
+    }
+
+    if (this.isRunning) {
+      this.state.phase = 'complete';
+      this.isRunning = false;
+      this.emit({ type: 'test_complete', result: this.state.results });
+    }
+  }
+
+  /**
+   * 하나의 주파수에 대한 역치 탐색
+   * START_DB에서 시작 → 반응 없으면 +20 dB → MAX_DB까지
+   */
+  private async testOneFrequency(ear: Ear, freq: TestFrequency): Promise<number> {
+    let currentDb = START_DB;
+
+    while (currentDb <= MAX_DB) {
+      if (!this.isRunning) return currentDb;
+
+      this.state.currentDb = currentDb;
+      this.state.phase = currentDb === START_DB ? 'familiarization' : 'ascending';
+      this.emit({ type: 'state_update', state: this.getState() });
+
+      // ISI 대기
+      await this.sleep(ISI_MS);
+      if (!this.isRunning) return currentDb;
+
+      // 순음 재생
+      this.responseReceived = false;
+      this.emit({ type: 'tone_start', frequency: freq, dbHL: currentDb });
+
+      const amplitude = this.dbHLToAmplitude(currentDb);
+      this.toneGen.playTone(freq, TONE_DURATION_MS, amplitude, ear);
+
+      // 순음 재생 중 응답 대기 (TONE_DURATION + RESPONSE_WINDOW)
+      const totalWait = TONE_DURATION_MS + RESPONSE_WINDOW_MS;
+      const responded = await this.waitForResponse(totalWait);
+
+      this.emit({ type: 'tone_end' });
+      if (!this.isRunning) return currentDb;
+
+      if (responded) {
+        return currentDb; // 역치 확정
+      }
+
+      // 미반응 → 20 dB 상승
+      currentDb += STEP_UP;
+    }
+
+    return MAX_DB; // 최대에서도 무반응
+  }
+
+  /**
+   * timeoutMs 이내에 responseReceived가 true가 되면 true 반환
+   * 카운트다운도 함께 방출
+   */
+  private waitForResponse(timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = setInterval(() => {
+        if (!this.isRunning) {
+          clearInterval(tick);
+          resolve(false);
+          return;
+        }
+        if (this.responseReceived) {
+          clearInterval(tick);
+          resolve(true);
+          return;
+        }
+        const elapsed = Date.now() - start;
+        const remaining = Math.ceil((timeoutMs - elapsed) / 1000);
+        if (remaining >= 0) {
+          this.emit({ type: 'countdown', seconds: remaining });
+        }
+        if (elapsed >= timeoutMs) {
+          clearInterval(tick);
+          resolve(false);
+        }
+      }, 100);
+    });
+  }
+
+  /**
+   * dB HL → 진폭 변환 (간이 선형 근사)
+   * 0 dB HL → ~0.001, 40 dB HL → ~0.08, 100 dB HL → 1.0
+   */
+  private dbHLToAmplitude(dbHL: number): number {
+    // 기준: 40 dB HL = 0.08 amplitude
+    const refDb = 40;
+    const refAmp = 0.08;
+    const amp = refAmp * Math.pow(10, (dbHL - refDb) / 20);
+    return Math.min(1.0, Math.max(0.001, amp));
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
