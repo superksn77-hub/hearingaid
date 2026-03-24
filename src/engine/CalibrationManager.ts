@@ -3,6 +3,7 @@ import { TestFrequency, CalibrationData } from '../types';
 // RETSPL offsets (dB) for insert earphones per ANSI S3.6
 // These convert dB SPL to dB HL. Lower = more sensitive ear at that freq.
 const DEFAULT_RETSPL: Record<TestFrequency, number> = {
+  125: 26.5,
   250: 14.5,
   500: 11.5,
   1000: 7.0,

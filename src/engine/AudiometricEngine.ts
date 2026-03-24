@@ -45,7 +45,7 @@ export class AudiometricEngine {
   private createInitialState(): AudiometricState {
     return {
       currentEar: 'right',
-      currentFrequency: 1000,
+      currentFrequency: 125,
       currentDb: 50,
       phase: 'idle',
       ascendingResponses: [],
@@ -75,7 +75,7 @@ export class AudiometricEngine {
     this.isRunning = true;
     this.isPaused = false;
     this.state.phase = 'familiarization';
-    this.state.currentFrequency = 1000;
+    this.state.currentFrequency = 125;
     this.state.currentDb = 50;
     this.ascendingLevelResponses.clear();
     this.emit({ type: 'state_update', state: this.getState() });
@@ -133,7 +133,7 @@ export class AudiometricEngine {
     this.emit({ type: 'tone_start', frequency: currentFrequency, dbHL: clampedDb });
     this.emit({ type: 'state_update', state: this.getState() });
 
-    await this.toneGen.playTone(currentFrequency, TONE_DURATION_MS, Math.max(0.001, amplitude));
+    await this.toneGen.playTone(currentFrequency, TONE_DURATION_MS, Math.max(0.001, amplitude), currentEar);
     this.emit({ type: 'tone_end' });
 
     // Response window: 1.5 seconds after tone
@@ -251,7 +251,7 @@ export class AudiometricEngine {
       if (currentEar === 'right') {
         // Switch to left ear
         this.state.currentEar = 'left';
-        this.state.currentFrequency = 1000;
+        this.state.currentFrequency = 125;
         this.state.currentDb = 50;
         this.state.phase = 'familiarization';
         this.emit({ type: 'state_update', state: this.getState() });

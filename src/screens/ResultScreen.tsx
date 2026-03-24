@@ -11,7 +11,7 @@ interface Props {
 }
 
 const FREQ_LABELS: Record<number, string> = {
-  250: '250Hz', 500: '500Hz', 1000: '1kHz',
+  125: '125Hz', 250: '250Hz', 500: '500Hz', 1000: '1kHz',
   2000: '2kHz', 4000: '4kHz', 8000: '8kHz',
 };
 

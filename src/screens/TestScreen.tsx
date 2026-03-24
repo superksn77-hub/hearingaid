@@ -11,7 +11,7 @@ interface Props {
 }
 
 const FREQ_LABELS: Record<number, string> = {
-  250: '250 Hz', 500: '500 Hz', 1000: '1 kHz',
+  125: '125 Hz', 250: '250 Hz', 500: '500 Hz', 1000: '1 kHz',
   2000: '2 kHz', 4000: '4 kHz', 8000: '8 kHz',
 };
 
@@ -33,7 +33,7 @@ export const TestScreen: React.FC<Props> = ({ navigation }) => {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const noiseCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Progress: each ear has 6 frequencies = 12 total steps
+  // Progress: each ear has 7 frequencies (125~8k) = 14 total steps
   const totalSteps = TEST_FREQUENCIES.length * 2;
   const [completedSteps, setCompletedSteps] = useState(0);
 

@@ -12,7 +12,7 @@ interface Props {
 }
 
 const FREQUENCIES = FREQUENCY_ORDER;
-const FREQ_LABELS = ['250', '500', '1k', '2k', '4k', '8k'];
+const FREQ_LABELS = ['125', '250', '500', '1k', '2k', '4k', '8k'];
 
 const DB_MIN = -10;
 const DB_MAX = 100;

@@ -1,51 +1,74 @@
 import { Audio } from 'expo-av';
+import { Ear } from '../types';
 
 const SAMPLE_RATE = 44100;
+const NUM_CHANNELS = 2; // stereo
 
-function createWavBuffer(
+/**
+ * Stereo WAV 생성
+ * - right ear: 우측 채널에만 신호, 좌측 채널 무음
+ * - left  ear: 좌측 채널에만 신호, 우측 채널 무음
+ */
+function createStereoPcmWav(
   frequency: number,
   durationMs: number,
-  amplitude: number, // 0 to 1
-  attackMs: number = 30,
-  releaseMs: number = 30
+  amplitude: number,
+  ear: Ear,
+  attackMs = 30,
+  releaseMs = 30
 ): ArrayBuffer {
   const numSamples = Math.floor((SAMPLE_RATE * durationMs) / 1000);
   const attackSamples = Math.floor((SAMPLE_RATE * attackMs) / 1000);
   const releaseSamples = Math.floor((SAMPLE_RATE * releaseMs) / 1000);
 
-  // WAV header: 44 bytes + PCM data (16-bit samples)
-  const dataSize = numSamples * 2;
+  // 스테레오: 샘플당 2채널 × 2바이트
+  const dataSize = numSamples * NUM_CHANNELS * 2;
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
-  // RIFF chunk
+  // RIFF / WAVE 헤더
   writeString(view, 0, 'RIFF');
   view.setUint32(4, 36 + dataSize, true);
   writeString(view, 8, 'WAVE');
-  // fmt chunk
+
+  // fmt 청크
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // chunk size
-  view.setUint16(20, 1, true);  // PCM format
-  view.setUint16(22, 1, true);  // mono
+  view.setUint32(16, 16, true);                          // chunk size
+  view.setUint16(20, 1, true);                           // PCM
+  view.setUint16(22, NUM_CHANNELS, true);                // 2 채널
   view.setUint32(24, SAMPLE_RATE, true);
-  view.setUint32(28, SAMPLE_RATE * 2, true); // byte rate
-  view.setUint16(32, 2, true);  // block align
-  view.setUint16(34, 16, true); // bits per sample
-  // data chunk
+  view.setUint32(28, SAMPLE_RATE * NUM_CHANNELS * 2, true); // byte rate
+  view.setUint16(32, NUM_CHANNELS * 2, true);            // block align
+  view.setUint16(34, 16, true);                          // bits/sample
+
+  // data 청크
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // PCM samples with envelope
+  // PCM 데이터 (인터리브: L, R, L, R, ...)
+  let offset = 44;
   for (let i = 0; i < numSamples; i++) {
+    // 어택/릴리즈 엔벨로프
     let env = 1.0;
     if (i < attackSamples) {
       env = i / attackSamples;
     } else if (i >= numSamples - releaseSamples) {
       env = (numSamples - i) / releaseSamples;
     }
+
     const sample = Math.sin((2 * Math.PI * frequency * i) / SAMPLE_RATE);
     const value = Math.round(sample * amplitude * env * 32767);
-    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, value)), true);
+    const clamped = Math.max(-32768, Math.min(32767, value));
+
+    // 좌측(L) 채널
+    const leftSample  = ear === 'left'  ? clamped : 0;
+    // 우측(R) 채널
+    const rightSample = ear === 'right' ? clamped : 0;
+
+    view.setInt16(offset, leftSample, true);
+    offset += 2;
+    view.setInt16(offset, rightSample, true);
+    offset += 2;
   }
 
   return buffer;
@@ -63,7 +86,6 @@ function bufferToBase64(buffer: ArrayBuffer): string {
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  // Use btoa if available
   if (typeof btoa !== 'undefined') {
     return btoa(binary);
   }
@@ -76,7 +98,8 @@ export class ToneGenerator {
   async playTone(
     frequencyHz: number,
     durationMs: number,
-    amplitude: number
+    amplitude: number,
+    ear: Ear = 'right'
   ): Promise<void> {
     await this.stop();
 
@@ -86,7 +109,7 @@ export class ToneGenerator {
         allowsRecordingIOS: false,
       });
 
-      const wavBuffer = createWavBuffer(frequencyHz, durationMs, amplitude);
+      const wavBuffer = createStereoPcmWav(frequencyHz, durationMs, Math.max(0.001, amplitude), ear);
       const base64 = bufferToBase64(wavBuffer);
       const uri = `data:audio/wav;base64,${base64}`;
 
@@ -96,8 +119,8 @@ export class ToneGenerator {
       );
       this.sound = sound;
 
-      // Auto-stop after duration
-      setTimeout(() => this.stop(), durationMs + 100);
+      // 재생 완료 후 자동 언로드
+      setTimeout(() => this.stop(), durationMs + 200);
     } catch (e) {
       console.warn('ToneGenerator error:', e);
     }
