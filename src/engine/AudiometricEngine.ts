@@ -2,24 +2,22 @@ import { TestFrequency, Ear, TestResult, TEST_FREQUENCIES, AudiometricState } fr
 import { ToneGenerator } from './ToneGenerator';
 
 /**
- * 간소화된 순음 청력 검사 엔진
+ * 순음 청력 검사 엔진
  *
- * 각 주파수마다:
- *  1) 40 dB HL로 순음 재생 (1.5초)
- *  2) 반응 창 2.5초 대기
- *  3) 반응 있으면 → 역치 = 40 dB, 다음 주파수
- *  4) 반응 없으면 → 20 dB 올려서 재시도 (최대 100 dB)
- *  5) 100 dB에서도 무반응 → 역치 = 100 dB (고도 난청)
+ * 각 주파수마다 0 dB HL 부터 10 dB 단위로 상승하며 탐색:
+ *  0 → 10 → 20 → ... → 100 dB HL
+ *  사용자가 처음 반응하는 레벨이 해당 주파수 역치
+ *  100 dB에서도 무반응 → 역치 = 100 dB (고도 난청)
  *
- * 우측 귀 7개 → 좌측 귀 7개 → 결과 화면
+ * 우측 귀 7개 주파수 → 좌측 귀 7개 주파수 → 결과 화면
  */
 
 const TONE_DURATION_MS = 1500;
 const RESPONSE_WINDOW_MS = 2500; // 순음 재생 후 응답 대기 시간
-const ISI_MS = 1200;             // 순음 간 간격 (Inter-Stimulus Interval)
+const ISI_MS = 1000;             // 순음 간 간격 (Inter-Stimulus Interval)
 
-const START_DB = 40;
-const STEP_UP = 20;
+const START_DB = 0;
+const STEP_UP = 10;
 const MAX_DB = 100;
 
 export type EngineEvent =
