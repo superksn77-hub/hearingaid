@@ -207,6 +207,7 @@ function buildPrintHtml(result: TestResult): string {
       <div class="sub-logo">Mobile Pure-Tone Audiometry System</div>
     </div>
     <div class="meta">
+      ${result.user?.name ? `<div>검사자: <strong>${result.user.name}</strong>${result.user.age ? ` (${result.user.age}세)` : ''}${result.user.gender === 'male' ? ' · 남성' : result.user.gender === 'female' ? ' · 여성' : ''}</div>` : ''}
       <div>검사일: <strong>${dateStr}</strong></div>
       <div>검사 방법: 기도 순음 청력 검사 (Air Conduction)</div>
       <div>검사 장비: 모바일 자가 검사 (스크리닝)</div>
@@ -307,11 +308,28 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>검사 결과</Text>
-      <Text style={styles.date}>
-        {new Date(result.date).toLocaleDateString('ko-KR', {
-          year: 'numeric', month: 'long', day: 'numeric'
-        })}
-      </Text>
+
+      {/* 사용자 정보 */}
+      {result.user?.name ? (
+        <View style={styles.userCard}>
+          <Text style={styles.userName}>
+            {result.user.name}
+            {result.user.age ? ` (${result.user.age}세)` : ''}
+            {result.user.gender === 'male' ? ' · 남성' : result.user.gender === 'female' ? ' · 여성' : result.user.gender === 'other' ? ' · 기타' : ''}
+          </Text>
+          <Text style={styles.userDate}>
+            검사일: {new Date(result.date).toLocaleDateString('ko-KR', {
+              year: 'numeric', month: 'long', day: 'numeric'
+            })}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.date}>
+          {new Date(result.date).toLocaleDateString('ko-KR', {
+            year: 'numeric', month: 'long', day: 'numeric'
+          })}
+        </Text>
+      )}
 
       {/* Audiogram */}
       <View style={styles.chartCard}>
@@ -385,6 +403,12 @@ const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 50 },
   title: { fontSize: 26, fontWeight: 'bold', color: '#1a237e', textAlign: 'center', marginTop: 20, marginBottom: 4 },
   date: { fontSize: 13, color: '#78909c', textAlign: 'center', marginBottom: 20 },
+  userCard: {
+    backgroundColor: '#e8eaf6', borderRadius: 12, padding: 12,
+    alignItems: 'center', marginBottom: 16,
+  },
+  userName: { fontSize: 17, fontWeight: 'bold', color: '#1a237e' },
+  userDate: { fontSize: 12, color: '#546e7a', marginTop: 4 },
   chartCard: {
     backgroundColor: 'white', borderRadius: 16, padding: 16, alignItems: 'center',
     marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,

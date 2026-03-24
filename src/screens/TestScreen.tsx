@@ -7,6 +7,7 @@ import { Ear, TestFrequency, TEST_FREQUENCIES } from '../types';
 
 interface Props {
   navigation: any;
+  route: { params?: { user?: import('../types').UserProfile } };
 }
 
 const FREQ_LABELS: Record<number, string> = {
@@ -19,7 +20,8 @@ const EAR_LABELS: Record<Ear, string> = {
   left: '🔵 좌측 귀 (L)',
 };
 
-export const TestScreen: React.FC<Props> = ({ navigation }) => {
+export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
+  const user = route?.params?.user;
   const engineRef = useRef(new AudiometricEngine());
   const engine = engineRef.current;
 
@@ -69,7 +71,7 @@ export const TestScreen: React.FC<Props> = ({ navigation }) => {
           }
           break;
         case 'test_complete':
-          navigation.navigate('Result', { result: event.result });
+          navigation.navigate('Result', { result: { ...event.result, user } });
           break;
       }
     });

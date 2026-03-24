@@ -17,10 +17,17 @@ export interface EarResult {
   thresholds: Partial<Record<TestFrequency, number>>;
 }
 
+export interface UserProfile {
+  name: string;
+  age: string;
+  gender: 'male' | 'female' | 'other' | '';
+}
+
 export interface TestResult {
   right: Partial<Record<TestFrequency, number>>;
   left: Partial<Record<TestFrequency, number>>;
   date: string;
+  user?: UserProfile;
 }
 
 export type TestPhase =

@@ -8,17 +8,19 @@ import { TestFrequency, FREQUENCY_ORDER } from '../types';
 
 interface Props {
   navigation: any;
+  route: { params?: { user?: import('../types').UserProfile } };
 }
 
 const CALIB_FREQUENCIES: TestFrequency[] = [1000, 2000, 4000, 500, 250];
 
-export const CalibrationScreen: React.FC<Props> = ({ navigation }) => {
+export const CalibrationScreen: React.FC<Props> = ({ navigation, route }) => {
+  const user = route?.params?.user;
   const toneGen = useRef(new ToneGenerator()).current;
   const [playing, setPlaying] = useState(false);
   const [step, setStep] = useState<'intro' | 'calib' | 'done'>('intro');
 
   const handleSkip = () => {
-    navigation.navigate('Test');
+    navigation.navigate('Test', { user });
   };
 
   const handlePlay = async () => {

@@ -26,7 +26,7 @@ export class ToneGenerator {
     amplitude: number,     // 0.0 ~ 1.0
     ear: Ear = 'right'
   ): Promise<void> {
-    await this.stop();
+    this.stop();  // 동기 호출 - await 제거로 즉시 정리
 
     try {
       const ctx = this.getContext();
@@ -78,15 +78,15 @@ export class ToneGenerator {
     }
   }
 
-  async stop(): Promise<void> {
+  stop(): void {
     try {
       if (this.activeOsc) {
-        this.activeOsc.stop();
-        this.activeOsc.disconnect();
+        try { this.activeOsc.stop(); } catch (_) {}
+        try { this.activeOsc.disconnect(); } catch (_) {}
         this.activeOsc = null;
       }
       if (this.activeGain) {
-        this.activeGain.disconnect();
+        try { this.activeGain.disconnect(); } catch (_) {}
         this.activeGain = null;
       }
     } catch (_) {}
