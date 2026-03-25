@@ -16,8 +16,32 @@ const FREQ_LABELS: Record<number, string> = {
 };
 
 const EAR_LABELS: Record<Ear, string> = {
-  right: '🔴 우측 귀 (R)',
-  left:  '🔵 좌측 귀 (L)',
+  right: '우측 귀 (R)',
+  left:  '좌측 귀 (L)',
+};
+
+// ── Design tokens ──────────────────────────────────────────────────────────
+const C = {
+  bg:          '#0a1628',
+  bgCard:      '#0f1f3d',
+  bgCardMid:   '#132040',
+  accentBlue:  '#1e88e5',
+  accentCyan:  '#00b8d4',
+  earRight:    '#ef5350',
+  earLeft:     '#42a5f5',
+  earRightBg:  'rgba(239,83,80,0.12)',
+  earLeftBg:   'rgba(66,165,245,0.12)',
+  earRightBdr: '#c62828',
+  earLeftBdr:  '#1565c0',
+  textWhite:   '#ffffff',
+  textMuted:   '#546e7a',
+  textDim:     '#37474f',
+  progressFg:  '#1e88e5',
+  progressBg:  '#132040',
+  errorRed:    '#b71c1c',
+  errorBorder: '#e53935',
+  btnRing:     '#1e88e5',
+  btnBg:       '#0f1f3d',
 };
 
 export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
@@ -31,17 +55,15 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [phase,           setPhase]           = useState<string>('idle');
   const [completedSteps,  setCompletedSteps]  = useState(0);
   const [earSwitchMsg,    setEarSwitchMsg]    = useState(false);
-  // 오반응 경고 표시 (잠깐 보였다 사라짐)
   const [falsePosAlert,   setFalsePosAlert]   = useState(false);
   const [falsePosReason,  setFalsePosReason]  = useState<'isi'|'catch'>('isi');
 
   const falsePosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 버튼 흔들기 애니메이션
-  const shakeAnim = useRef(new Animated.Value(0)).current;
+  const shakeAnim     = useRef(new Animated.Value(0)).current;
 
   const totalSteps = TEST_FREQUENCIES.length * 2; // 14
 
-  // ── 버튼 흔들기 애니메이션 ──────────────────────────────
+  // ── Shake animation (false positive only) ───────────────────────────
   const triggerShake = () => {
     shakeAnim.setValue(0);
     Animated.sequence([
@@ -53,7 +75,7 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
     ]).start();
   };
 
-  // ── 오반응 경고 표시 ────────────────────────────────────
+  // ── False positive alert ─────────────────────────────────────────────
   const showFalsePositiveAlert = (reason: 'isi' | 'catch') => {
     if (falsePosTimer.current) clearTimeout(falsePosTimer.current);
     setFalsePosReason(reason);
@@ -63,7 +85,7 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
     falsePosTimer.current = setTimeout(() => setFalsePosAlert(false), 1800);
   };
 
-  // ── 스페이스바 지원 (웹) ────────────────────────────────
+  // ── Spacebar support (web) ───────────────────────────────────────────
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.key === ' ') {
@@ -77,7 +99,7 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, []);
 
-  // ── 엔진 이벤트 구독 ────────────────────────────────────
+  // ── Engine event listener ────────────────────────────────────────────
   useEffect(() => {
     engine.setListener((event: EngineEvent) => {
       switch (event.type) {
@@ -134,140 +156,430 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   };
 
-  const progressPct = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
-
   const phaseLabel: Record<string, string> = {
     familiarization: '소리 크기 파악 중',
     ascending:       '역치 탐색 중',
-    threshold_found: '✓ 역치 확인됨',
+    threshold_found: '역치 확인됨',
     idle:            '귀 전환 준비 중...',
     complete:        '완료',
   };
 
+  const isRight = currentEar === 'right';
+
   return (
     <View style={styles.container}>
 
-      {/* 귀 전환 오버레이 */}
+      {/* ── EAR SWITCH OVERLAY ──────────────────────────────────────── */}
       {earSwitchMsg && (
         <View style={styles.earSwitchOverlay}>
-          <Text style={styles.earSwitchIcon}>🔵</Text>
+          <View style={styles.earSwitchIconWrap}>
+            <View style={styles.earSwitchDot} />
+          </View>
           <Text style={styles.earSwitchTitle}>좌측 귀 검사로 전환합니다</Text>
           <Text style={styles.earSwitchSub}>이어폰을 그대로 유지하세요</Text>
         </View>
       )}
 
-      {/* 헤더 */}
-      <View style={styles.header}>
-        <View style={[styles.earBadge, currentEar === 'left' && styles.earBadgeLeft]}>
-          <Text style={styles.earLabel}>{EAR_LABELS[currentEar]}</Text>
+      {/* ── TOP SECTION ─────────────────────────────────────────────── */}
+      <View style={styles.topSection}>
+
+        {/* Ear badge */}
+        <View style={[
+          styles.earBadge,
+          isRight ? styles.earBadgeRight : styles.earBadgeLeft,
+        ]}>
+          <View style={[
+            styles.earDot,
+            { backgroundColor: isRight ? C.earRight : C.earLeft },
+          ]} />
+          <Text style={[
+            styles.earLabel,
+            { color: isRight ? C.earRight : C.earLeft },
+          ]}>
+            {EAR_LABELS[currentEar]}
+          </Text>
         </View>
-        <Text style={styles.freqLabel}>{FREQ_LABELS[currentFreq] ?? `${currentFreq} Hz`}</Text>
+
+        {/* Frequency */}
+        <Text style={styles.freqLabel}>
+          {FREQ_LABELS[currentFreq] ?? `${currentFreq} Hz`}
+        </Text>
         <Text style={styles.dbLabel}>{currentDb} dB HL</Text>
       </View>
 
-      {/* 진행 바 */}
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${progressPct}%` as any }]} />
+      {/* ── SEGMENTED PROGRESS BAR ──────────────────────────────────── */}
+      <View style={styles.progressSection}>
+        <View style={styles.segBarRow}>
+          {Array.from({ length: totalSteps }).map((_, i) => {
+            const isRight7 = i < 7;
+            const filled   = i < completedSteps;
+            return (
+              <View
+                key={i}
+                style={[
+                  styles.segBar,
+                  i === 6 && styles.segBarGap,
+                  filled
+                    ? (isRight7 ? styles.segBarFilledRight : styles.segBarFilledLeft)
+                    : styles.segBarEmpty,
+                ]}
+              />
+            );
+          })}
         </View>
-        <Text style={styles.progressText}>{completedSteps} / {totalSteps} 주파수 완료</Text>
+        <View style={styles.segLabels}>
+          <Text style={styles.segLabelText}>우측 (R)</Text>
+          <Text style={styles.segLabelText}>좌측 (L)</Text>
+        </View>
+        <Text style={styles.progressCount}>{completedSteps} / {totalSteps} 주파수 완료</Text>
       </View>
 
-      {/* 단계 안내 */}
-      <Text style={styles.phaseText}>{phaseLabel[phase] ?? phase}</Text>
+      {/* ── PHASE TEXT ──────────────────────────────────────────────── */}
+      <Text style={styles.phaseText}>
+        {phaseLabel[phase] ?? phase}
+      </Text>
 
-      {/* 오반응 경고 배너 */}
+      {/* ── FALSE POSITIVE BANNER ───────────────────────────────────── */}
       {falsePosAlert && (
         <View style={styles.falsePosBox}>
+          <View style={styles.falsePosIconWrap}>
+            <Text style={styles.falsePosIcon}>✕</Text>
+          </View>
           <Text style={styles.falsePosText}>
             {falsePosReason === 'catch'
-              ? '❌ 소리가 없었습니다 — 오반응'
-              : '❌ 대기 중에 눌렀습니다 — 오반응'}
+              ? '소리가 없었습니다 — 오반응'
+              : '대기 중에 눌렀습니다 — 오반응'}
           </Text>
         </View>
       )}
 
-      {/* 반응 버튼 (오반응 시 흔들림) */}
+      {/* ── RESPONSE BUTTON (visually static) ──────────────────────── */}
       <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
         <TouchableOpacity
-          style={[styles.responseButton, falsePosAlert && styles.responseButtonError]}
           onPress={handleResponse}
-          activeOpacity={0.75}
+          activeOpacity={0.88}
+          style={styles.responseTouchable}
         >
-          <Text style={styles.responseButtonText}>소리가 들리면{'\n'}누르세요</Text>
-          <Text style={styles.responseButtonSub}>또는 스페이스바</Text>
+          {/* Outer decorative ring */}
+          <View style={[
+            styles.responseRingOuter,
+            falsePosAlert && styles.responseRingOuterError,
+          ]}>
+            {/* Inner ring */}
+            <View style={[
+              styles.responseRingInner,
+              falsePosAlert && styles.responseRingInnerError,
+            ]}>
+              {/* Button core */}
+              <View style={styles.responseCore}>
+                <Text style={styles.responseMainText}>소리가 들리면{'\n'}누르세요</Text>
+                <Text style={styles.responseSubText}>또는 스페이스바</Text>
+              </View>
+            </View>
+          </View>
         </TouchableOpacity>
       </Animated.View>
 
-      <Text style={styles.hint}>소리가 날 때만 누르세요{'\n'}소리 없을 때 누르면 오반응 처리됩니다</Text>
+      {/* ── HINT TEXT ───────────────────────────────────────────────── */}
+      <Text style={styles.hintText}>
+        소리가 날 때만 누르세요
+      </Text>
+      <Text style={styles.hintTextSub}>
+        소리 없을 때 누르면 오반응 처리됩니다
+      </Text>
 
-      {/* 중단 버튼 */}
+      {/* ── ABORT BUTTON ────────────────────────────────────────────── */}
       <TouchableOpacity style={styles.abortButton} onPress={handleAbort}>
-        <Text style={styles.abortText}>검사 중단</Text>
+        <View style={styles.abortInner}>
+          <Text style={styles.abortText}>검사 중단</Text>
+        </View>
       </TouchableOpacity>
+
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: '#0d1b2a',
-    alignItems: 'center', paddingTop: 60, paddingHorizontal: 20,
+    flex: 1,
+    backgroundColor: C.bg,
+    alignItems: 'center',
+    paddingTop: 56,
+    paddingHorizontal: 20,
   },
 
-  // 귀 전환 오버레이
+  // ── EAR SWITCH OVERLAY ────────────────────────────────────────────────
   earSwitchOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.88)', alignItems: 'center',
-    justifyContent: 'center', zIndex: 200, padding: 30,
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(2,8,20,0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 200,
+    padding: 32,
   },
-  earSwitchIcon:  { fontSize: 64, marginBottom: 16 },
-  earSwitchTitle: { fontSize: 22, fontWeight: 'bold', color: '#90caf9', textAlign: 'center', marginBottom: 12 },
-  earSwitchSub:   { fontSize: 14, color: '#78909c', textAlign: 'center', lineHeight: 22 },
+  earSwitchIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 3,
+    borderColor: C.earLeft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    backgroundColor: C.earLeftBg,
+  },
+  earSwitchDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.earLeft,
+  },
+  earSwitchTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#90caf9',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  earSwitchSub: {
+    fontSize: 14,
+    color: C.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
 
-  // 헤더
-  header: { alignItems: 'center', marginBottom: 20 },
+  // ── TOP SECTION ───────────────────────────────────────────────────────
+  topSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+    width: '100%',
+  },
   earBadge: {
-    backgroundColor: '#3a1a1a', borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 6, marginBottom: 8,
-    borderWidth: 1, borderColor: '#c62828',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    marginBottom: 12,
+    borderWidth: 1.5,
   },
-  earBadgeLeft:   { backgroundColor: '#1a1a3a', borderColor: '#1565C0' },
-  earLabel:       { fontSize: 15, color: '#ef9a9a', fontWeight: '600' },
-  freqLabel:      { fontSize: 34, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
-  dbLabel:        { fontSize: 16, color: '#78909c' },
+  earBadgeRight: {
+    backgroundColor: C.earRightBg,
+    borderColor: C.earRightBdr,
+  },
+  earBadgeLeft: {
+    backgroundColor: C.earLeftBg,
+    borderColor: C.earLeftBdr,
+  },
+  earDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  earLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  freqLabel: {
+    fontSize: 42,
+    fontWeight: '900',
+    color: C.textWhite,
+    letterSpacing: -1,
+    marginBottom: 4,
+  },
+  dbLabel: {
+    fontSize: 16,
+    color: C.textMuted,
+    fontWeight: '500',
+  },
 
-  // 진행 바
-  progressContainer: { width: '100%', marginBottom: 10 },
-  progressBar:       { height: 6, backgroundColor: '#1a3a5c', borderRadius: 3, overflow: 'hidden' },
-  progressFill:      { height: '100%', backgroundColor: '#42a5f5', borderRadius: 3 },
-  progressText:      { fontSize: 12, color: '#546e7a', textAlign: 'center', marginTop: 4 },
+  // ── SEGMENTED PROGRESS ────────────────────────────────────────────────
+  progressSection: {
+    width: '100%',
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  segBarRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 6,
+    alignItems: 'center',
+  },
+  segBar: {
+    width: 17,
+    height: 8,
+    borderRadius: 4,
+  },
+  segBarGap: {
+    marginRight: 8,
+  },
+  segBarEmpty: {
+    backgroundColor: C.progressBg,
+  },
+  segBarFilledRight: {
+    backgroundColor: '#ef5350',
+  },
+  segBarFilledLeft: {
+    backgroundColor: C.accentBlue,
+  },
+  segLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '72%',
+    marginBottom: 4,
+  },
+  segLabelText: {
+    fontSize: 10,
+    color: C.textDim,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  progressCount: {
+    fontSize: 12,
+    color: C.textMuted,
+    fontWeight: '500',
+  },
 
-  phaseText: { fontSize: 13, color: '#78909c', marginBottom: 8 },
+  // ── PHASE TEXT ────────────────────────────────────────────────────────
+  phaseText: {
+    fontSize: 13,
+    color: C.textMuted,
+    marginBottom: 10,
+    letterSpacing: 0.3,
+    fontStyle: 'italic',
+  },
 
-  // 오반응 경고
+  // ── FALSE POSITIVE BANNER ─────────────────────────────────────────────
   falsePosBox: {
-    backgroundColor: '#b71c1c', borderRadius: 10,
-    paddingHorizontal: 16, paddingVertical: 8, marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: C.errorRed,
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: C.errorBorder,
   },
-  falsePosText: { color: '#ffffff', fontSize: 13, fontWeight: 'bold', textAlign: 'center' },
+  falsePosIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  falsePosIcon: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  falsePosText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 
-  // 반응 버튼
-  responseButton: {
-    width: 220, height: 220, borderRadius: 110,
-    backgroundColor: '#1a3a5c', borderWidth: 4, borderColor: '#1976D2',
-    justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#1976D2', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8,
+  // ── RESPONSE BUTTON ───────────────────────────────────────────────────
+  // The button is visually completely static — no state tied to isPlaying.
+  // Only the falsePosAlert state causes any visual change (ring tint to red).
+  responseTouchable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 0,
   },
-  responseButtonError: {
-    borderColor: '#e53935', backgroundColor: '#2a1a1a', shadowColor: '#e53935',
+  responseRingOuter: {
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    borderWidth: 2,
+    borderColor: 'rgba(30,136,229,0.30)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(30,136,229,0.04)',
   },
-  responseButtonText: {
-    color: '#90caf9', fontSize: 20, fontWeight: 'bold', textAlign: 'center', lineHeight: 28,
+  responseRingOuterError: {
+    borderColor: 'rgba(229,57,53,0.40)',
+    backgroundColor: 'rgba(229,57,53,0.05)',
   },
-  responseButtonSub: { color: '#546e7a', fontSize: 12, marginTop: 8 },
+  responseRingInner: {
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    borderWidth: 3,
+    borderColor: C.btnRing,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(30,136,229,0.06)',
+    shadowColor: C.btnRing,
+    shadowOpacity: 0.20,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  responseRingInnerError: {
+    borderColor: C.errorBorder,
+    shadowColor: C.errorBorder,
+  },
+  responseCore: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: C.btnBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  responseMainText: {
+    color: '#90caf9',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 28,
+    marginBottom: 10,
+  },
+  responseSubText: {
+    color: C.textMuted,
+    fontSize: 12,
+    fontWeight: '400',
+    textAlign: 'center',
+  },
 
-  hint: { fontSize: 12, color: '#37474f', textAlign: 'center', marginTop: 20, lineHeight: 20 },
-  abortButton: { position: 'absolute', bottom: 30, right: 20, padding: 12 },
-  abortText:   { color: '#546e7a', fontSize: 14 },
+  // ── HINT TEXT ─────────────────────────────────────────────────────────
+  hintText: {
+    fontSize: 12,
+    color: C.textMuted,
+    textAlign: 'center',
+    marginTop: 20,
+    fontWeight: '500',
+  },
+  hintTextSub: {
+    fontSize: 11,
+    color: C.textDim,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+
+  // ── ABORT BUTTON ──────────────────────────────────────────────────────
+  abortButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+  },
+  abortInner: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.textDim,
+  },
+  abortText: {
+    color: C.textMuted,
+    fontSize: 13,
+    fontWeight: '500',
+  },
 });
