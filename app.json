@@ -27,7 +27,8 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "publicPath": "/hearingaid/"
     },
     "plugins": [
       "expo-asset"
