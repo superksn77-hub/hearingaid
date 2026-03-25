@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [master]   # master 브랜치에 push될 때 자동 배포
+    branches: [master]
 
 permissions:
   contents: write
@@ -26,6 +26,10 @@ jobs:
 
       - name: Build web (Expo)
         run: npx expo export --platform web
+
+      # SPA 라우팅을 위한 404.html 생성
+      - name: Copy index.html to 404.html
+        run: cp dist/index.html dist/404.html
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
