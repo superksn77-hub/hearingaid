@@ -2,39 +2,53 @@ import { TestFrequency, Ear, TestResult, TEST_FREQUENCIES, AudiometricState } fr
 import { ToneGenerator } from './ToneGenerator';
 
 /**
- * 순음 청력 검사 엔진 (수정된 Hughson-Westlake 방식)
+ * 순음 청력 검사 엔진
  *
- * 각 주파수마다 0 dB HL → 10 dB 단위로 상승 탐색:
- *  - playTone + waitForResponse 를 Promise.all 로 병렬 실행
- *  - 사용자가 처음 반응하는 레벨이 해당 주파수 역치
- *  - 100 dB 에서도 무반응 → 역치 = 100 dB (고도 난청)
+ * ┌─────────────────────────────────────────────────────────┐
+ * │  응답 유효성 판별                                         │
+ * │                                                         │
+ * │  [ISI 침묵 구간]  →  [순음 재생]  →  [여운 대기]         │
+ * │   800~1400ms         1500ms          500ms             │
+ * │                                                         │
+ * │  이 구간에서 누름    이 구간에서 누름   이 구간에서 누름   │
+ * │  = 오반응(위양성)   = 정반응          = 정반응           │
+ * │  → 그 레벨 "못들음" → 역치 확정       → 역치 확정        │
+ * └─────────────────────────────────────────────────────────┘
  *
- * 우측 귀 7개 → 좌측 귀 7개 → 결과 화면
+ * ISI 중 버튼을 누르면 false_positive 이벤트 발생 → UI에 경고 표시
+ * 해당 dB 레벨은 "미반응"으로 처리 → 10 dB 상승
  */
 
-const TONE_DURATION_MS  = 1500;  // 순음 재생 시간
-const RESPONSE_WINDOW_MS = 2000; // 재생 후 추가 응답 대기 시간
-const ISI_MIN_MS = 800;          // 자극 간격 최소
-const ISI_MAX_MS = 1400;         // 자극 간격 최대 (무작위)
+const TONE_DURATION_MS = 1500;  // 순음 재생 시간
+const GRACE_MS         = 500;   // 순음 종료 후 응답 허용 여운
+const ISI_MIN_MS       = 900;   // 자극 간격 최소 (무작위 → 예측 불가)
+const ISI_MAX_MS       = 1800;  // 자극 간격 최대
 
 const START_DB = 0;
 const STEP_UP  = 10;
 const MAX_DB   = 100;
 
 export type EngineEvent =
-  | { type: 'tone_start';        frequency: number; dbHL: number }
+  | { type: 'tone_start';      frequency: number; dbHL: number }
   | { type: 'tone_end' }
-  | { type: 'threshold_found';   ear: Ear; frequency: TestFrequency; dbHL: number }
-  | { type: 'ear_complete';      ear: Ear }
-  | { type: 'test_complete';     result: TestResult }
-  | { type: 'state_update';      state: AudiometricState };
+  | { type: 'false_positive' }                              // ISI 중 누름
+  | { type: 'threshold_found'; ear: Ear; frequency: TestFrequency; dbHL: number }
+  | { type: 'ear_complete';    ear: Ear }
+  | { type: 'test_complete';   result: TestResult }
+  | { type: 'state_update';    state: AudiometricState };
 
 export class AudiometricEngine {
-  private toneGen   = new ToneGenerator();
-  private state     = this.makeState();
+  private toneGen    = new ToneGenerator();
+  private state      = this.makeState();
   private listener: ((e: EngineEvent) => void) | null = null;
-  private isRunning = false;
-  private _responded = false;   // 응답 플래그 (단순 필드, 동기적)
+  private isRunning  = false;
+
+  // 두 개의 독립된 플래그
+  private _respondedInISI  = false; // ISI 침묵 구간에서 눌렸는지
+  private _respondedInTone = false; // 순음 구간에서 눌렸는지
+
+  // 현재 어느 구간인지
+  private _phase: 'isi' | 'tone' | 'none' = 'none';
 
   // ── 공개 API ──────────────────────────────────────────────
 
@@ -42,22 +56,36 @@ export class AudiometricEngine {
   getState() { return { ...this.state }; }
 
   async start() {
-    this.state     = this.makeState();
+    this.state    = this.makeState();
     this.isRunning = true;
-    this._responded = false;
+    this._phase    = 'none';
     this.emit({ type: 'state_update', state: this.getState() });
     await this.runAllFrequencies();
   }
 
   stop() {
     this.isRunning = false;
+    this._phase    = 'none';
     this.toneGen.stop();
   }
 
-  /** 버튼 / 스페이스바 누를 때 호출 */
+  /**
+   * 버튼 / 스페이스바 누를 때 호출
+   *
+   * _phase 에 따라 플래그를 분리해서 기록:
+   *  - 'isi'  구간 → _respondedInISI  = true  (오반응)
+   *  - 'tone' 구간 → _respondedInTone = true  (정반응)
+   *  - 'none' 구간 → 무시
+   */
   onUserResponse() {
     if (!this.isRunning) return;
-    this._responded = true;
+    if (this._phase === 'isi') {
+      this._respondedInISI = true;
+      this.emit({ type: 'false_positive' });
+    } else if (this._phase === 'tone') {
+      this._respondedInTone = true;
+    }
+    // 'none' 구간은 무시
   }
 
   dispose() {
@@ -69,13 +97,13 @@ export class AudiometricEngine {
 
   private makeState(): AudiometricState {
     return {
-      currentEar:          'right',
-      currentFrequency:    125,
-      currentDb:           START_DB,
-      phase:               'familiarization',
-      ascendingResponses:  [],
-      trialCount:          0,
-      results:             { right: {}, left: {}, date: new Date().toISOString() },
+      currentEar:         'right',
+      currentFrequency:   125,
+      currentDb:          START_DB,
+      phase:              'familiarization',
+      ascendingResponses: [],
+      trialCount:         0,
+      results:            { right: {}, left: {}, date: new Date().toISOString() },
     };
   }
 
@@ -104,13 +132,12 @@ export class AudiometricEngine {
         this.emit({ type: 'threshold_found', ear, frequency: freq, dbHL: threshold });
         this.emit({ type: 'state_update', state: this.getState() });
 
-        await this.sleep(500);
+        await this.sleep(600);
       }
 
       this.emit({ type: 'ear_complete', ear });
 
       if (ear === 'right') {
-        // 귀 전환 안내용 대기
         this.state.phase = 'idle';
         this.emit({ type: 'state_update', state: this.getState() });
         await this.sleep(2200);
@@ -125,10 +152,14 @@ export class AudiometricEngine {
   }
 
   /**
-   * 한 주파수의 역치 탐색:
-   *  0 → 10 → 20 → ... → 100 dB HL
-   *  playTone 과 waitForResponse 를 Promise.all 로 병렬 실행
-   *  → 어느 쪽이 먼저 끝나도 반드시 둘 다 완료된 뒤 다음 단계
+   * 한 주파수 역치 탐색
+   *
+   * 각 dB 레벨마다:
+   *  1) ISI 침묵 구간 (_phase = 'isi')  → 이때 누르면 오반응
+   *  2) 순음+여운 구간 (_phase = 'tone') → 이때만 정반응
+   *
+   *  정반응 && 오반응 없음 → 역치 확정
+   *  오반응 발생 OR 정반응 없음 → 미반응 → 10 dB 상승
    */
   private async testOneFrequency(ear: Ear, freq: TestFrequency): Promise<number> {
     let db = START_DB;
@@ -141,41 +172,53 @@ export class AudiometricEngine {
       this.state.phase     = db === START_DB ? 'familiarization' : 'ascending';
       this.emit({ type: 'state_update', state: this.getState() });
 
-      // 무작위 ISI (위양성 방지)
+      // ── ① ISI 침묵 구간 ──────────────────────────────────
       const isi = ISI_MIN_MS + Math.random() * (ISI_MAX_MS - ISI_MIN_MS);
+      this._respondedInISI  = false;
+      this._respondedInTone = false;
+      this._phase = 'isi';          // 이 구간에서 누르면 → 오반응
+
       await this.sleep(isi);
       if (!this.isRunning) return db;
 
-      // 응답 플래그 초기화 (ISI 이후에 리셋 → ISI 중 버튼 무시)
-      this._responded = false;
+      const falsePositive = this._respondedInISI;  // ISI 중 눌렸는지 기록
+
+      // ── ② 순음 + 여운 구간 ───────────────────────────────
+      this._respondedInTone = false;
+      this._phase = 'tone';         // 이 구간에서만 → 정반응
       this.emit({ type: 'tone_start', frequency: freq, dbHL: db });
 
       const amplitude = this.dbHLToAmplitude(db);
 
-      // ★ 핵심 수정: playTone + waitForResponse 를 Promise.all 로 병렬 실행
-      const [, responded] = await Promise.all([
+      // playTone 과 유효응답 대기를 동시에 실행
+      const [, heardInWindow] = await Promise.all([
         this.toneGen.playTone(freq, TONE_DURATION_MS, amplitude, ear),
-        this.waitForResponse(TONE_DURATION_MS + RESPONSE_WINDOW_MS),
+        this.waitForToneResponse(TONE_DURATION_MS + GRACE_MS),
       ]);
 
+      this._phase = 'none';         // 순음 구간 종료 → 이후 누름 무시
       this.emit({ type: 'tone_end' });
       if (!this.isRunning) return db;
 
-      if (responded) {
-        return db;   // 역치 확정
+      // ── ③ 판정 ──────────────────────────────────────────
+      //  정반응 O + 오반응 X  → 역치 확정
+      //  오반응 O (ISI 중 누름) → 이 레벨 무효 → 상승
+      //  정반응 X              → 못들음 → 상승
+      if (heardInWindow && !falsePositive) {
+        return db;
       }
 
-      db += STEP_UP; // 미반응 → 10 dB 상승
+      db += STEP_UP;
     }
 
-    return MAX_DB; // 100 dB 에서도 무반응
+    return MAX_DB;
   }
 
   /**
-   * timeoutMs 이내에 _responded 가 true 가 되면 true 반환.
-   * 100 ms 폴링.
+   * tone 구간 전용 응답 대기
+   * _respondedInTone 플래그만 감시 (ISI 플래그와 완전히 분리)
    */
-  private waitForResponse(timeoutMs: number): Promise<boolean> {
+  private waitForToneResponse(timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
       const deadline = Date.now() + timeoutMs;
       const tick = setInterval(() => {
@@ -184,7 +227,7 @@ export class AudiometricEngine {
           resolve(false);
           return;
         }
-        if (this._responded) {
+        if (this._respondedInTone) {
           clearInterval(tick);
           resolve(true);
           return;
@@ -193,18 +236,13 @@ export class AudiometricEngine {
           clearInterval(tick);
           resolve(false);
         }
-      }, 100);
+      }, 50);
     });
   }
 
-  /**
-   * dB HL → 진폭 (0.001 ~ 1.0)
-   * 기준: 40 dB HL = 0.10 (헤드폰 기준 충분히 들리는 레벨)
-   */
+  /** dB HL → 진폭 (0.001 ~ 1.0) · 기준 40 dB HL = 0.10 */
   private dbHLToAmplitude(dbHL: number): number {
-    const refDb  = 40;
-    const refAmp = 0.10;
-    const amp    = refAmp * Math.pow(10, (dbHL - refDb) / 20);
+    const amp = 0.10 * Math.pow(10, (dbHL - 40) / 20);
     return Math.min(1.0, Math.max(0.001, amp));
   }
 
