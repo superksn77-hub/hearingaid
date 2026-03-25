@@ -33,6 +33,7 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [earSwitchMsg,    setEarSwitchMsg]    = useState(false);
   // 오반응 경고 표시 (잠깐 보였다 사라짐)
   const [falsePosAlert,   setFalsePosAlert]   = useState(false);
+  const [falsePosReason,  setFalsePosReason]  = useState<'isi'|'catch'>('isi');
 
   const falsePosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 버튼 흔들기 애니메이션
@@ -53,8 +54,9 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   // ── 오반응 경고 표시 ────────────────────────────────────
-  const showFalsePositiveAlert = () => {
+  const showFalsePositiveAlert = (reason: 'isi' | 'catch') => {
     if (falsePosTimer.current) clearTimeout(falsePosTimer.current);
+    setFalsePosReason(reason);
     setFalsePosAlert(true);
     triggerShake();
     if (Platform.OS !== 'web') Vibration.vibrate([0, 80, 60, 80]);
@@ -88,7 +90,7 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
           break;
         }
         case 'false_positive':
-          showFalsePositiveAlert();
+          showFalsePositiveAlert(event.reason);
           break;
         case 'threshold_found':
           setCompletedSteps(prev => prev + 1);
@@ -177,7 +179,11 @@ export const TestScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* 오반응 경고 배너 */}
       {falsePosAlert && (
         <View style={styles.falsePosBox}>
-          <Text style={styles.falsePosText}>⚠️ 소리가 없을 때 눌렀습니다 — 오반응</Text>
+          <Text style={styles.falsePosText}>
+            {falsePosReason === 'catch'
+              ? '❌ 소리가 없었습니다 — 오반응'
+              : '❌ 대기 중에 눌렀습니다 — 오반응'}
+          </Text>
         </View>
       )}
 
