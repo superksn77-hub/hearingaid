@@ -93,6 +93,36 @@ export async function checkDeviceStatus(deviceId: string): Promise<DeviceStatus 
   return localRead()[deviceId]?.status ?? null;
 }
 
+/** 기기 정보만 최신으로 업데이트 (상태/이름 변경 없음) */
+export async function refreshDeviceInfo(deviceId: string): Promise<void> {
+  let info: Partial<DeviceInfo> = {};
+  try {
+    if (typeof window !== 'undefined') info = collectDeviceInfo();
+  } catch (_) { return; }
+
+  if (!info.os) return; // 수집 실패 시 스킵
+
+  const db = getDb();
+  if (db) {
+    try {
+      const ref = doc(db, 'devices', deviceId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await updateDoc(ref, info as any);
+      }
+      return;
+    } catch (e) {
+      console.error('[Firebase] refreshDeviceInfo 오류:', e);
+    }
+  }
+  // localStorage 폴백
+  const local = localRead();
+  if (local[deviceId]) {
+    Object.assign(local[deviceId], info);
+    localWrite(local);
+  }
+}
+
 /** 기기를 pending 상태로 등록 (상세 기기 정보 포함) */
 export async function registerDevice(deviceId: string, userName?: string): Promise<void> {
   // 상세 기기 정보 수집

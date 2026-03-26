@@ -8,7 +8,7 @@ import {
   ActivityIndicator, Platform, ScrollView, TextInput,
 } from 'react-native';
 import { generateDeviceFingerprint } from '../utils/deviceFingerprint';
-import { checkDeviceStatus, registerDevice, DeviceStatus, getBackendMode } from '../services/deviceLicense';
+import { checkDeviceStatus, registerDevice, refreshDeviceInfo, DeviceStatus, getBackendMode } from '../services/deviceLicense';
 
 interface Props {
   onApproved:   () => void;   // 승인 완료 → 메인 앱 진입
@@ -72,8 +72,12 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
 
       const status: DeviceStatus | null = await checkDeviceStatus(id);
 
+      // 이미 등록된 기기 → 최신 기기 정보 자동 갱신 (백그라운드)
+      if (status !== null) {
+        refreshDeviceInfo(id).catch(() => {});
+      }
+
       if (status === 'approved') {
-        // 승인됨 → 자동 진입하지 않고 버튼 대기 화면 표시
         setGateState('approved');
         return;
       }
@@ -112,8 +116,9 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     setGateState('checking');
     try {
       const status = await checkDeviceStatus(deviceId);
+      if (status !== null) refreshDeviceInfo(deviceId).catch(() => {});
       if (status === 'approved') {
-        setGateState('approved');   // 승인됨 화면으로 (자동 진입 X)
+        setGateState('approved');
       } else {
         setGateState(status ?? 'pending');
       }
