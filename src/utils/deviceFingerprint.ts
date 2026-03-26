@@ -132,13 +132,16 @@ function detectBrowser(ua: string): string {
   return 'Unknown Browser';
 }
 
-function detectDeviceType(ua: string, touch: boolean): string {
-  if (/iPad/.test(ua)) return '태블릿 (iPad)';
-  if (/Android/.test(ua) && /Mobile/.test(ua)) return '스마트폰 (Android)';
-  if (/iPhone/.test(ua)) return '스마트폰 (iPhone)';
-  if (/Android/.test(ua)) return '태블릿 (Android)';
-  if (touch && window.innerWidth <= 768) return '스마트폰';
-  if (touch && window.innerWidth <= 1024) return '태블릿';
+function detectDeviceType(ua: string): string {
+  // 데스크탑 OS는 터치 여부와 무관하게 PC로 확정
+  if (/Windows NT/.test(ua) && !/IEMobile/.test(ua)) return 'PC / 데스크탑 (Windows)';
+  if (/Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua)) return 'PC / 데스크탑 (Mac)';
+  if (/Linux/.test(ua) && !/Android/.test(ua)) return 'PC / 데스크탑 (Linux)';
+  // 모바일/태블릿
+  if (/iPad/.test(ua))                          return '태블릿 (iPad)';
+  if (/iPhone/.test(ua))                        return '스마트폰 (iPhone)';
+  if (/Android/.test(ua) && /Mobile/.test(ua))  return '스마트폰 (Android)';
+  if (/Android/.test(ua))                       return '태블릿 (Android)';
   return 'PC / 데스크탑';
 }
 
@@ -155,7 +158,7 @@ export function collectDeviceInfo(): DeviceInfo {
       : (gl ? String(gl.getParameter(gl.RENDERER)) : 'N/A');
 
     return {
-      deviceType:   detectDeviceType(ua, touch),
+      deviceType:   detectDeviceType(ua),
       os:           detectOS(ua),
       browser:      detectBrowser(ua),
       screenRes:    `${screen.width}×${screen.height} (${screen.colorDepth}bit)`,

@@ -92,11 +92,24 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     }
   }, []);
 
+  // 이름 유효성 검사
+  const validateName = (name: string): string | null => {
+    if (!name) return '이름을 입력해주세요.';
+    if (name.length < 2) return '이름은 2글자 이상 입력해주세요.';
+    if (name.length > 20) return '이름은 20자 이하로 입력해주세요.';
+    // 한글 자모만 있는 경우 차단 (ㄱ,ㄴ,ㅣ 등 단독 자모)
+    if (/^[\u3131-\u318E\s]+$/.test(name)) return '올바른 이름을 입력해주세요. (예: 홍길동)';
+    // 숫자만 있는 경우 차단
+    if (/^\d+$/.test(name)) return '이름에는 문자가 포함되어야 합니다.';
+    return null;
+  };
+
   // 이름 입력 후 등록 신청
   const handleSubmitName = useCallback(async () => {
     const name = userName.trim();
-    if (!name) {
-      setNameError('이름을 입력해주세요.');
+    const err = validateName(name);
+    if (err) {
+      setNameError(err);
       return;
     }
     setNameError('');
