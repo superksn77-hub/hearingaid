@@ -27,6 +27,17 @@ jobs:
       - name: Build web (Expo)
         run: npx expo export --platform web
 
+      # 빌드 결과 경로 검증 (/hearingaid/ 포함 여부)
+      - name: Verify asset paths
+        run: |
+          echo "=== index.html script/link tags ==="
+          grep -E "script src|link rel" dist/index.html
+          if grep -q 'src="/_expo/' dist/index.html; then
+            echo "❌ ERROR: JS 경로에 /hearingaid/ 가 없음 — app.json experiments.baseUrl 확인 필요"
+            exit 1
+          fi
+          echo "✅ 경로 정상 확인"
+
       # Jekyll 비활성화 (_expo/ 같은 _로 시작하는 폴더가 무시되는 문제 방지)
       - name: Disable Jekyll
         run: touch dist/.nojekyll
