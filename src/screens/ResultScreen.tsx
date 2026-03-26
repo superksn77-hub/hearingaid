@@ -520,9 +520,25 @@ function buildPrintHtml(result: TestResult): string {
     <div class="sign-box">검사자 확인<br><br></div>
   </div>
 
+  <!-- 모바일 인쇄 버튼 (인쇄 시 숨김) -->
+  <div class="no-print" style="text-align:center;margin:24px 0 8px;padding:16px;background:#f0f4ff;border-radius:10px;border:1px solid #c5cae9;">
+    <p style="margin:0 0 10px;color:#37474f;font-size:12px;line-height:1.7;">
+      📱 <strong>모바일:</strong> 아래 버튼 → 브라우저 공유 메뉴 → <strong>"PDF로 저장"</strong> 또는 <strong>"인쇄"</strong> 선택<br>
+      🖥️ <strong>PC:</strong> 아래 버튼 → 인쇄 대화상자 → 대상: <strong>"PDF로 저장"</strong> 선택
+    </p>
+    <button onclick="window.print()" style="background:#1a237e;color:white;border:none;padding:13px 36px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold;letter-spacing:0.5px;">
+      🖨️ 인쇄 / PDF 저장
+    </button>
+  </div>
+
 </div>
 <script>
-  window.onload = function() { window.print(); };
+  // PC 브라우저에서만 자동 인쇄 다이얼로그
+  var ua = navigator.userAgent;
+  var isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+  if (!isMobile) {
+    window.onload = function() { setTimeout(function(){ window.print(); }, 400); };
+  }
 </script>
 </body>
 </html>`;
@@ -542,14 +558,46 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
   const healthRisks = analyzeHealthRisks(result);
 
   const handleExportPdf = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const html = buildPrintHtml(result);
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      alert('PDF 내보내기는 웹 환경에서 지원됩니다.');
+      return;
+    }
+
+    const html = buildPrintHtml(result);
+    const ua = navigator.userAgent;
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+
+    // ── 방법 1: 동기적 window.open (팝업 차단 우회) ────────────────
+    // 클릭 핸들러 내에서 즉시 호출하므로 모바일에서도 허용됨
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      return;
+    }
+
+    // ── 방법 2: 팝업 차단된 경우 → 파일 다운로드 폴백 ─────────────
+    try {
+      const dateStr = new Date().toLocaleDateString('ko-KR')
+        .replace(/\.\s*/g, '-').replace(/-$/, '');
+      const filename = `HICOG_청력검사_${dateStr}.html`;
       const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
       const url  = URL.createObjectURL(blob);
-      const win  = window.open(url, '_blank');
-      if (win) win.focus();
-    } else {
-      alert('PDF 내보내기는 웹 환경에서 지원됩니다.');
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+      if (isMobile) {
+        alert('파일이 다운로드되었습니다.\n다운로드된 파일을 열고 브라우저 공유 메뉴에서 "인쇄"를 선택하면 PDF로 저장할 수 있습니다.');
+      }
+    } catch (e) {
+      alert('저장에 실패했습니다.\n브라우저 설정에서 팝업 차단을 해제해 주세요.');
     }
   };
 
