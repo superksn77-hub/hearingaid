@@ -24,8 +24,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web (Expo)
+      - name: Build web (Expo + Firebase 환경변수 주입)
         run: npx expo export --platform web
+        env:
+          EXPO_PUBLIC_FB_API_KEY:            ${{ secrets.FB_API_KEY }}
+          EXPO_PUBLIC_FB_AUTH_DOMAIN:        ${{ secrets.FB_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FB_PROJECT_ID:         ${{ secrets.FB_PROJECT_ID }}
+          EXPO_PUBLIC_FB_STORAGE_BUCKET:     ${{ secrets.FB_STORAGE_BUCKET }}
+          EXPO_PUBLIC_FB_MESSAGING_SENDER_ID: ${{ secrets.FB_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FB_APP_ID:             ${{ secrets.FB_APP_ID }}
+          EXPO_PUBLIC_ADMIN_KEY:             ${{ secrets.ADMIN_KEY }}
 
       # 빌드 결과 경로 검증 (/hearingaid/ 포함 여부)
       - name: Verify asset paths
@@ -33,16 +41,16 @@ jobs:
           echo "=== index.html script/link tags ==="
           grep -E "script src|link rel" dist/index.html
           if grep -q 'src="/_expo/' dist/index.html; then
-            echo "❌ ERROR: JS 경로에 /hearingaid/ 가 없음 — app.json experiments.baseUrl 확인 필요"
+            echo "❌ ERROR: JS 경로에 /hearingaid/ 가 없음"
             exit 1
           fi
           echo "✅ 경로 정상 확인"
 
-      # Jekyll 비활성화 (_expo/ 같은 _로 시작하는 폴더가 무시되는 문제 방지)
+      # Jekyll 비활성화
       - name: Disable Jekyll
         run: touch dist/.nojekyll
 
-      # SPA 라우팅을 위한 404.html 생성
+      # SPA 라우팅용 404.html
       - name: Copy index.html to 404.html
         run: cp dist/index.html dist/404.html
 
