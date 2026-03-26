@@ -6,6 +6,7 @@
  */
 
 import { FIREBASE_CONFIG, IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
+import { collectDeviceInfo, DeviceInfo } from '../utils/deviceFingerprint';
 
 // Firebase 정적 imports (트리쉐이킹 적용)
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
@@ -38,11 +39,22 @@ export interface DeviceRecord {
   deviceId:     string;
   status:       DeviceStatus;
   label:        string;
-  userName?:    string;   // 사용자가 입력한 이름
-  registeredAt: string;
-  approvedAt?:  string;
-  userAgent?:   string;
-  screenInfo?:  string;
+  userName?:    string;
+  registeredAt: any;
+  approvedAt?:  any;
+
+  // ── 상세 기기 정보 ──
+  deviceType?:   string;   // PC / 스마트폰 / 태블릿
+  os?:           string;   // Windows 10/11 / macOS / iOS / Android
+  browser?:      string;   // Chrome 120 / Safari / Edge
+  screenRes?:    string;   // 1920×1080 (32bit)
+  cpuCores?:     number;   // 논리 CPU 코어 수
+  ramGB?:        number;   // GB
+  gpu?:          string;   // GPU 렌더러
+  language?:     string;   // ko-KR
+  timezone?:     string;   // Asia/Seoul
+  touchSupport?: boolean;
+  userAgent?:    string;
 }
 
 // ── localStorage 폴백 ────────────────────────────────────────────────────
@@ -81,16 +93,34 @@ export async function checkDeviceStatus(deviceId: string): Promise<DeviceStatus 
   return localRead()[deviceId]?.status ?? null;
 }
 
-/** 기기를 pending 상태로 등록 */
+/** 기기를 pending 상태로 등록 (상세 기기 정보 포함) */
 export async function registerDevice(deviceId: string, userName?: string): Promise<void> {
+  // 상세 기기 정보 수집
+  let info: Partial<DeviceInfo> = {};
+  try {
+    if (typeof window !== 'undefined') {
+      info = collectDeviceInfo();
+    }
+  } catch (_) {}
+
   const record: DeviceRecord = {
     deviceId,
     status:       'pending',
     label:        '',
     userName:     userName ?? '',
     registeredAt: new Date().toISOString(),
-    userAgent:    typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : '',
-    screenInfo:   typeof screen    !== 'undefined' ? `${screen.width}x${screen.height}` : '',
+    // 상세 정보
+    deviceType:   info.deviceType,
+    os:           info.os,
+    browser:      info.browser,
+    screenRes:    info.screenRes,
+    cpuCores:     info.cpuCores,
+    ramGB:        info.ramGB,
+    gpu:          info.gpu,
+    language:     info.language,
+    timezone:     info.timezone,
+    touchSupport: info.touchSupport,
+    userAgent:    info.userAgent,
   };
 
   const db = getDb();
@@ -101,10 +131,10 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
       if (!snap.exists()) {
         await setDoc(ref, { ...record, registeredAt: serverTimestamp() });
       } else {
-        // 이미 등록된 경우 이름만 업데이트
-        if (userName) {
-          await updateDoc(ref, { userName });
-        }
+        // 이미 등록된 경우 이름 + 최신 기기 정보 업데이트
+        const update: Partial<DeviceRecord> = { ...info };
+        if (userName) update.userName = userName;
+        await updateDoc(ref, update as any);
       }
       return;
     } catch (e) {
@@ -115,8 +145,9 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
   const local = localRead();
   if (!local[deviceId]) {
     local[deviceId] = record;
-  } else if (userName) {
-    local[deviceId].userName = userName;
+  } else {
+    Object.assign(local[deviceId], info);
+    if (userName) local[deviceId].userName = userName;
   }
   localWrite(local);
 }

@@ -1,6 +1,5 @@
 /**
  * AdminScreen – 기기 인증 관리자 패널
- * 비밀번호 확인 후 등록된 기기 목록을 조회하고 승인/차단/삭제할 수 있습니다.
  */
 import React, { useState, useCallback } from 'react';
 import {
@@ -52,14 +51,13 @@ const STATUS_LABEL: Record<DeviceStatus, string> = {
 };
 
 export const AdminScreen: React.FC<Props> = ({ onClose }) => {
-  const [phase,    setPhase]    = useState<'login' | 'panel'>('login');
-  const [pw,       setPw]       = useState('');
-  const [pwError,  setPwError]  = useState('');
-  const [devices,  setDevices]  = useState<DeviceRecord[]>([]);
-  const [loading,  setLoading]  = useState(false);
-  const [filter,   setFilter]   = useState<DeviceStatus | 'all'>('all');
+  const [phase,   setPhase]   = useState<'login' | 'panel'>('login');
+  const [pw,      setPw]      = useState('');
+  const [pwError, setPwError] = useState('');
+  const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter,  setFilter]  = useState<DeviceStatus | 'all'>('all');
 
-  // ── 로그인 ────────────────────────────────────────────────────────────
   const handleLogin = () => {
     if (pw === ADMIN_PASSWORD) {
       setPwError('');
@@ -71,12 +69,10 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     }
   };
 
-  // ── 기기 목록 로드 ────────────────────────────────────────────────────
   const loadDevices = useCallback(async () => {
     setLoading(true);
     try {
       const list = await getAllDevices();
-      // registeredAt 기준 최신순 정렬
       list.sort((a, b) => {
         const ta = typeof a.registeredAt === 'string' ? a.registeredAt : '';
         const tb = typeof b.registeredAt === 'string' ? b.registeredAt : '';
@@ -90,26 +86,21 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     }
   }, []);
 
-  // ── 상태 변경 ─────────────────────────────────────────────────────────
   const handleStatus = async (deviceId: string, status: DeviceStatus) => {
     try {
       await setDeviceStatus(deviceId, status);
-      setDevices(prev =>
-        prev.map(d => d.deviceId === deviceId ? { ...d, status } : d)
-      );
-    } catch (e) {
+      setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, status } : d));
+    } catch {
       showAlert('오류', '상태 변경에 실패했습니다.');
     }
   };
 
-  // ── 기기 삭제 ─────────────────────────────────────────────────────────
   const handleDelete = async (deviceId: string) => {
     const confirm = () => {
       deleteDevice(deviceId)
         .then(() => setDevices(prev => prev.filter(d => d.deviceId !== deviceId)))
         .catch(() => showAlert('오류', '삭제에 실패했습니다.'));
     };
-
     if (Platform.OS === 'web') {
       if (window.confirm(`기기 ${deviceId} 를 삭제하시겠습니까?`)) confirm();
     } else {
@@ -133,21 +124,13 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     blocked:  devices.filter(d => d.status === 'blocked').length,
   };
 
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // 로그인 화면
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ── 로그인 화면 ────────────────────────────────────────────────────────
   if (phase === 'login') {
     return (
       <View style={styles.center}>
         <View style={styles.loginCard}>
           <Text style={styles.loginTitle}>관리자 로그인</Text>
-          <Text style={styles.loginSub}>
-            관리자 비밀번호를 입력하세요.{'\n'}
-            <Text style={{ color: C.muted, fontSize: 11 }}>
-              (기본값: hicog2024 — 환경변수 EXPO_PUBLIC_ADMIN_KEY 로 변경)
-            </Text>
-          </Text>
-
+          <Text style={styles.loginSub}>관리자 비밀번호를 입력하세요.</Text>
           <TextInput
             style={styles.input}
             placeholder="비밀번호"
@@ -158,13 +141,10 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
             onSubmitEditing={handleLogin}
             returnKeyType="done"
           />
-
           {!!pwError && <Text style={styles.errorText}>{pwError}</Text>}
-
           <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
             <Text style={styles.loginBtnText}>로그인</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.backLink} onPress={onClose}>
             <Text style={styles.backLinkText}>← 돌아가기</Text>
           </TouchableOpacity>
@@ -173,9 +153,7 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     );
   }
 
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // 관리자 패널
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ── 관리자 패널 ────────────────────────────────────────────────────────
   return (
     <ScrollView style={styles.panelBg} contentContainerStyle={styles.panelContent}>
 
@@ -186,7 +164,7 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           <View style={styles.modeBadge}>
             <View style={[styles.modeDot, { backgroundColor: IS_FIREBASE_CONFIGURED ? C.green : C.orange }]} />
             <Text style={styles.modeText}>
-              {IS_FIREBASE_CONFIGURED ? 'Firebase 서버 모드' : '로컬 테스트 모드'}
+              {IS_FIREBASE_CONFIGURED ? '🔥 Firebase 클라우드 모드' : '⚠️ 로컬 테스트 모드'}
             </Text>
           </View>
         </View>
@@ -200,18 +178,15 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         </View>
       </View>
 
-      {/* 통계 카드 */}
+      {/* 통계 */}
       <View style={styles.statsRow}>
-        {([ 'all', 'pending', 'approved', 'blocked' ] as const).map(s => (
+        {(['all', 'pending', 'approved', 'blocked'] as const).map(s => (
           <TouchableOpacity
             key={s}
             style={[styles.statCard, filter === s && styles.statCardActive]}
             onPress={() => setFilter(s)}
           >
-            <Text style={[
-              styles.statNum,
-              s !== 'all' && { color: STATUS_COLOR[s as DeviceStatus] },
-            ]}>
+            <Text style={[styles.statNum, s !== 'all' && { color: STATUS_COLOR[s as DeviceStatus] }]}>
               {counts[s]}
             </Text>
             <Text style={styles.statLabel}>
@@ -221,15 +196,12 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         ))}
       </View>
 
-      {/* 로딩 */}
       {loading && (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="small" color={C.cyan} />
           <Text style={styles.loadingText}>기기 목록 불러오는 중...</Text>
         </View>
       )}
-
-      {/* 기기 목록 */}
       {!loading && filtered.length === 0 && (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyText}>등록된 기기가 없습니다.</Text>
@@ -246,7 +218,6 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           onDelete={()  => handleDelete(device.deviceId)}
         />
       ))}
-
     </ScrollView>
   );
 };
@@ -259,6 +230,7 @@ const DeviceCard: React.FC<{
   onPending: () => void;
   onDelete:  () => void;
 }> = ({ device, onApprove, onBlock, onPending, onDelete }) => {
+  const [expanded, setExpanded] = useState(false);
   const col = STATUS_COLOR[device.status];
   const bg  = STATUS_BG[device.status];
 
@@ -269,40 +241,68 @@ const DeviceCard: React.FC<{
     } catch { return String(ts); }
   };
 
+  const deviceIcon = () => {
+    const t = device.deviceType ?? '';
+    if (t.includes('스마트폰') || t.includes('iPhone')) return '📱';
+    if (t.includes('태블릿') || t.includes('iPad'))    return '📟';
+    return '🖥️';
+  };
+
   return (
     <View style={[styles.deviceCard, { borderLeftColor: col }]}>
+
       {/* 상태 배지 + 기기 ID */}
       <View style={styles.deviceHeader}>
         <View style={[styles.statusBadge, { backgroundColor: bg, borderColor: col }]}>
-          <Text style={[styles.statusBadgeText, { color: col }]}>
-            {STATUS_LABEL[device.status]}
-          </Text>
+          <Text style={[styles.statusBadgeText, { color: col }]}>{STATUS_LABEL[device.status]}</Text>
         </View>
-        <Text style={styles.deviceId} selectable>{device.deviceId}</Text>
+        <Text style={styles.deviceIdText} selectable>{device.deviceId}</Text>
       </View>
 
-      {/* 사용자 이름 */}
-      {device.userName ? (
-        <View style={styles.userNameBox}>
-          <Text style={styles.userNameIcon}>👤</Text>
-          <Text style={styles.userNameText}>{device.userName}</Text>
-        </View>
-      ) : (
-        <View style={styles.userNameBoxEmpty}>
-          <Text style={styles.userNameEmptyText}>이름 미입력</Text>
-        </View>
-      )}
+      {/* 사용자 이름 + 기기 종류 */}
+      <View style={styles.userNameBox}>
+        <Text style={styles.userNameIcon}>👤</Text>
+        <Text style={styles.userNameText}>
+          {device.userName || '이름 미입력'}
+        </Text>
+        {device.deviceType && (
+          <View style={styles.deviceTypePill}>
+            <Text style={styles.deviceTypePillText}>{deviceIcon()} {device.deviceType}</Text>
+          </View>
+        )}
+      </View>
 
-      {/* 메타 정보 */}
-      <Text style={styles.deviceMeta}>등록: {dateStr(device.registeredAt)}</Text>
-      {device.approvedAt && (
-        <Text style={styles.deviceMeta}>승인: {dateStr(device.approvedAt)}</Text>
-      )}
-      {device.screenInfo && (
-        <Text style={styles.deviceMeta}>화면: {device.screenInfo}</Text>
-      )}
-      {device.userAgent && (
-        <Text style={styles.deviceUA} numberOfLines={2}>{device.userAgent}</Text>
+      {/* 핵심 정보 그리드 */}
+      <View style={styles.infoGrid}>
+        <InfoChip icon="💻" label="OS"       value={device.os ?? '-'} />
+        <InfoChip icon="🌐" label="브라우저"  value={device.browser ?? '-'} />
+        <InfoChip icon="🖥" label="해상도"    value={device.screenRes ?? '-'} />
+        <InfoChip icon="⚙️" label="CPU 코어" value={device.cpuCores ? `${device.cpuCores}코어` : '-'} />
+        <InfoChip icon="🧠" label="RAM"      value={device.ramGB ? `${device.ramGB} GB` : '-'} />
+        <InfoChip icon="🌏" label="언어/시간대" value={
+          device.language ? `${device.language} · ${device.timezone}` : '-'
+        } />
+      </View>
+
+      {/* 등록/승인 시각 */}
+      <View style={styles.timeRow}>
+        <Text style={styles.timeText}>📅 등록: {dateStr(device.registeredAt)}</Text>
+        {device.approvedAt && (
+          <Text style={styles.timeText}>✅ 승인: {dateStr(device.approvedAt)}</Text>
+        )}
+      </View>
+
+      {/* 상세 정보 토글 */}
+      <TouchableOpacity style={styles.expandBtn} onPress={() => setExpanded(e => !e)}>
+        <Text style={styles.expandBtnText}>{expanded ? '▲ 상세 정보 숨기기' : '▼ GPU · UA 등 상세 보기'}</Text>
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={styles.expandedBox}>
+          <DetailRow label="GPU"      value={device.gpu ?? '-'} />
+          <DetailRow label="터치 지원" value={device.touchSupport ? '✅ 지원' : '❌ 미지원'} />
+          <DetailRow label="User-Agent" value={device.userAgent ?? '-'} mono />
+        </View>
       )}
 
       {/* 액션 버튼 */}
@@ -330,111 +330,113 @@ const DeviceCard: React.FC<{
   );
 };
 
-// ── 스타일 ─────────────────────────────────────────────────────────────────
+// ── 서브 컴포넌트 ─────────────────────────────────────────────────────────
+const InfoChip: React.FC<{ icon: string; label: string; value: string }> = ({ icon, label, value }) => (
+  <View style={styles.infoChip}>
+    <Text style={styles.infoChipLabel}>{icon} {label}</Text>
+    <Text style={styles.infoChipValue} numberOfLines={1}>{value}</Text>
+  </View>
+);
+
+const DetailRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
+  <View style={styles.detailRow}>
+    <Text style={styles.detailLabel}>{label}</Text>
+    <Text style={[styles.detailValue, mono && styles.detailMono]} selectable>{value}</Text>
+  </View>
+);
+
+// ── 스타일 ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  center:      { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  panelBg:     { flex: 1, backgroundColor: C.bg },
-  panelContent:{ padding: 20, paddingBottom: 60 },
+  center:       { flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  panelBg:      { flex: 1, backgroundColor: C.bg },
+  panelContent: { padding: 20, paddingBottom: 60 },
 
   // 로그인
   loginCard: {
     backgroundColor: C.card, borderRadius: 20, padding: 28,
     width: '100%', maxWidth: 380, borderWidth: 1, borderColor: C.cardBdr,
   },
-  loginTitle: { fontSize: 22, fontWeight: '800', color: C.white, marginBottom: 8, textAlign: 'center' },
-  loginSub:   { fontSize: 13, color: C.muted, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  loginTitle:   { fontSize: 22, fontWeight: '800', color: C.white, marginBottom: 8, textAlign: 'center' },
+  loginSub:     { fontSize: 13, color: C.muted, textAlign: 'center', marginBottom: 24 },
   input: {
     backgroundColor: C.input, borderRadius: 10,
     borderWidth: 1, borderColor: C.cardBdr,
     color: C.white, fontSize: 16,
-    paddingHorizontal: 14, paddingVertical: 13,
-    marginBottom: 8,
+    paddingHorizontal: 14, paddingVertical: 13, marginBottom: 8,
   },
-  errorText: { color: C.red, fontSize: 13, marginBottom: 12, textAlign: 'center' },
-  loginBtn: {
-    backgroundColor: C.blue, borderRadius: 12,
-    paddingVertical: 14, alignItems: 'center', marginTop: 8,
-  },
+  errorText:    { color: C.red, fontSize: 13, marginBottom: 12, textAlign: 'center' },
+  loginBtn:     { backgroundColor: C.blue, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 },
   loginBtnText: { color: C.white, fontSize: 15, fontWeight: '700' },
-  backLink: { marginTop: 16, alignItems: 'center' },
+  backLink:     { marginTop: 16, alignItems: 'center' },
   backLinkText: { color: C.muted, fontSize: 13 },
 
-  // 패널 상단바
-  topBar: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  panelTitle: { fontSize: 22, fontWeight: '800', color: C.white },
-  modeBadge:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  modeDot:    { width: 7, height: 7, borderRadius: 4 },
-  modeText:   { fontSize: 11, color: C.muted },
-  topBarRight:{ flexDirection: 'row', gap: 8, alignItems: 'center' },
-  refreshBtn: {
-    borderWidth: 1, borderColor: C.cardBdr, borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 6,
-  },
-  refreshBtnText: { color: C.cyan, fontSize: 13, fontWeight: '600' },
-  closeBtn: {
-    backgroundColor: '#1a0a0a', borderRadius: 8,
-    width: 34, height: 34, alignItems: 'center', justifyContent: 'center',
-  },
-  closeBtnText: { color: C.red, fontSize: 16, fontWeight: '700' },
+  // 패널 상단
+  topBar:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  panelTitle:    { fontSize: 22, fontWeight: '800', color: C.white },
+  modeBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  modeDot:       { width: 7, height: 7, borderRadius: 4 },
+  modeText:      { fontSize: 11, color: C.muted },
+  topBarRight:   { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  refreshBtn:    { borderWidth: 1, borderColor: C.cardBdr, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  refreshBtnText:{ color: C.cyan, fontSize: 13, fontWeight: '600' },
+  closeBtn:      { backgroundColor: '#1a0a0a', borderRadius: 8, width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  closeBtnText:  { color: C.red, fontSize: 16, fontWeight: '700' },
 
   // 통계
-  statsRow:     { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  statCard: {
-    flex: 1, backgroundColor: C.card, borderRadius: 12,
-    borderWidth: 1, borderColor: C.cardBdr,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  statCardActive: { borderColor: C.cyan },
-  statNum:   { fontSize: 22, fontWeight: '900', color: C.white },
-  statLabel: { fontSize: 10, color: C.muted, fontWeight: '600', marginTop: 2, textTransform: 'uppercase' },
-
-  // 로딩 / 빈 상태
-  loadingBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 20, justifyContent: 'center' },
-  loadingText: { color: C.muted, fontSize: 14 },
-  emptyBox: { padding: 40, alignItems: 'center' },
-  emptyText: { color: C.muted, fontSize: 15 },
+  statsRow:      { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  statCard:      { flex: 1, backgroundColor: C.card, borderRadius: 12, borderWidth: 1, borderColor: C.cardBdr, paddingVertical: 12, alignItems: 'center' },
+  statCardActive:{ borderColor: C.cyan },
+  statNum:       { fontSize: 22, fontWeight: '900', color: C.white },
+  statLabel:     { fontSize: 10, color: C.muted, fontWeight: '600', marginTop: 2, textTransform: 'uppercase' },
+  loadingBox:    { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 20, justifyContent: 'center' },
+  loadingText:   { color: C.muted, fontSize: 14 },
+  emptyBox:      { padding: 40, alignItems: 'center' },
+  emptyText:     { color: C.muted, fontSize: 15 },
 
   // 기기 카드
   deviceCard: {
     backgroundColor: C.card, borderRadius: 14,
-    borderWidth: 1, borderColor: C.cardBdr,
-    borderLeftWidth: 4,
+    borderWidth: 1, borderColor: C.cardBdr, borderLeftWidth: 4,
     padding: 16, marginBottom: 12,
   },
-  deviceHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  statusBadge: {
-    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1,
-  },
+  deviceHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  statusBadge:     { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
   statusBadgeText: { fontSize: 11, fontWeight: '700' },
-  deviceId: { fontSize: 14, fontWeight: '700', color: C.cyan, letterSpacing: 1, flex: 1 },
+  deviceIdText:    { fontSize: 13, fontWeight: '700', color: C.cyan, letterSpacing: 1, flex: 1 },
+
+  // 사용자 이름
   userNameBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(30,136,229,0.12)',
-    borderWidth: 1, borderColor: 'rgba(30,136,229,0.30)',
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7,
-    marginBottom: 10, alignSelf: 'flex-start',
+    flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+    backgroundColor: 'rgba(30,136,229,0.10)',
+    borderWidth: 1, borderColor: 'rgba(30,136,229,0.25)',
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12,
   },
-  userNameIcon: { fontSize: 14 },
-  userNameText: { fontSize: 15, fontWeight: '800', color: C.white },
-  userNameBoxEmpty: {
-    backgroundColor: 'rgba(84,110,122,0.10)',
-    borderWidth: 1, borderColor: 'rgba(84,110,122,0.20)',
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
-    marginBottom: 10, alignSelf: 'flex-start',
-  },
-  userNameEmptyText: { fontSize: 11, color: C.muted, fontStyle: 'italic' },
-  deviceMeta: { fontSize: 11, color: C.muted, marginBottom: 2 },
-  deviceUA: { fontSize: 10, color: C.dim, marginTop: 4, marginBottom: 8, lineHeight: 14 },
+  userNameIcon:     { fontSize: 16 },
+  userNameText:     { fontSize: 17, fontWeight: '800', color: C.white, flex: 1 },
+  deviceTypePill:   { backgroundColor: 'rgba(0,184,212,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(0,184,212,0.30)' },
+  deviceTypePillText:{ fontSize: 11, color: C.cyan, fontWeight: '600' },
 
-  // 액션 버튼
-  actionRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 4 },
-  actionBtn: {
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7,
-    borderWidth: 1, borderColor: 'transparent',
-  },
-  actionBtnText: { fontSize: 12, fontWeight: '700' },
+  // 정보 그리드
+  infoGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  infoChip:      { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', minWidth: 120, flex: 1 },
+  infoChipLabel: { fontSize: 9, color: C.muted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  infoChipValue: { fontSize: 12, color: C.white, fontWeight: '600' },
 
+  // 시간
+  timeRow:  { flexDirection: 'row', gap: 16, marginBottom: 8, flexWrap: 'wrap' },
+  timeText: { fontSize: 11, color: C.muted },
+
+  // 상세 토글
+  expandBtn:     { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', paddingTop: 10, marginTop: 4, marginBottom: 4, alignItems: 'center' },
+  expandBtnText: { fontSize: 11, color: C.cyan, fontWeight: '600' },
+  expandedBox:   { backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  detailRow:     { marginBottom: 8 },
+  detailLabel:   { fontSize: 10, color: C.muted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  detailValue:   { fontSize: 12, color: '#90a4ae', lineHeight: 18 },
+  detailMono:    { fontFamily: 'monospace', fontSize: 10 },
+
+  // 액션
+  actionRow:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 8 },
+  actionBtn:     { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: 'transparent' },
+  actionBtnText: { fontSize: 13, fontWeight: '700' },
 });

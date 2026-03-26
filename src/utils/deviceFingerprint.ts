@@ -77,6 +77,105 @@ function webglFp(): string {
   } catch (_) { return ''; }
 }
 
+// ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
+export interface DeviceInfo {
+  deviceType:   string;   // PC / 스마트폰 / 태블릿
+  os:           string;   // Windows 11 / macOS / iOS / Android
+  browser:      string;   // Chrome 120 / Safari / Edge
+  screenRes:    string;   // 1920x1080
+  cpuCores:     number;   // 논리 코어 수
+  ramGB:        number;   // GB (일부 브라우저 지원)
+  gpu:          string;   // GPU 렌더러
+  language:     string;   // ko-KR
+  timezone:     string;   // Asia/Seoul
+  touchSupport: boolean;  // 터치 지원 여부
+  userAgent:    string;   // 전체 UA
+}
+
+function detectOS(ua: string): string {
+  if (/Windows NT 10\.0/.test(ua)) {
+    // Windows 11은 UA가 같지만 platform 힌트로 구분
+    return 'Windows 10/11';
+  }
+  if (/Windows NT 6\.3/.test(ua)) return 'Windows 8.1';
+  if (/Windows NT 6\.1/.test(ua)) return 'Windows 7';
+  if (/Windows/.test(ua))         return 'Windows';
+  if (/iPhone OS/.test(ua))       return `iOS ${(ua.match(/iPhone OS ([\d_]+)/) ?? [])[1]?.replace(/_/g,'.')}`;
+  if (/iPad/.test(ua))            return `iPadOS ${(ua.match(/OS ([\d_]+)/) ?? [])[1]?.replace(/_/g,'.')}`;
+  if (/Android/.test(ua))         return `Android ${(ua.match(/Android ([\d.]+)/) ?? [])[1] ?? ''}`;
+  if (/Mac OS X/.test(ua))        return `macOS ${(ua.match(/Mac OS X ([\d_]+)/) ?? [])[1]?.replace(/_/g,'.') ?? ''}`;
+  if (/Linux/.test(ua))           return 'Linux';
+  return 'Unknown OS';
+}
+
+function detectBrowser(ua: string): string {
+  if (/Edg\//.test(ua)) {
+    const v = (ua.match(/Edg\/([\d.]+)/) ?? [])[1]?.split('.')[0];
+    return `Microsoft Edge ${v ?? ''}`;
+  }
+  if (/OPR\/|Opera/.test(ua)) {
+    const v = (ua.match(/OPR\/([\d.]+)/) ?? [])[1]?.split('.')[0];
+    return `Opera ${v ?? ''}`;
+  }
+  if (/Chrome\//.test(ua)) {
+    const v = (ua.match(/Chrome\/([\d.]+)/) ?? [])[1]?.split('.')[0];
+    return `Chrome ${v ?? ''}`;
+  }
+  if (/Firefox\//.test(ua)) {
+    const v = (ua.match(/Firefox\/([\d.]+)/) ?? [])[1]?.split('.')[0];
+    return `Firefox ${v ?? ''}`;
+  }
+  if (/Safari\//.test(ua)) {
+    const v = (ua.match(/Version\/([\d.]+)/) ?? [])[1]?.split('.')[0];
+    return `Safari ${v ?? ''}`;
+  }
+  return 'Unknown Browser';
+}
+
+function detectDeviceType(ua: string, touch: boolean): string {
+  if (/iPad/.test(ua)) return '태블릿 (iPad)';
+  if (/Android/.test(ua) && /Mobile/.test(ua)) return '스마트폰 (Android)';
+  if (/iPhone/.test(ua)) return '스마트폰 (iPhone)';
+  if (/Android/.test(ua)) return '태블릿 (Android)';
+  if (touch && window.innerWidth <= 768) return '스마트폰';
+  if (touch && window.innerWidth <= 1024) return '태블릿';
+  return 'PC / 데스크탑';
+}
+
+export function collectDeviceInfo(): DeviceInfo {
+  try {
+    const ua      = navigator.userAgent;
+    const touch   = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    const c       = document.createElement('canvas');
+    const gl      = c.getContext('webgl') as WebGLRenderingContext | null
+                    || c.getContext('experimental-webgl') as WebGLRenderingContext | null;
+    const ext     = gl?.getExtension('WEBGL_debug_renderer_info');
+    const gpu     = ext
+      ? String(gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+      : (gl ? String(gl.getParameter(gl.RENDERER)) : 'N/A');
+
+    return {
+      deviceType:   detectDeviceType(ua, touch),
+      os:           detectOS(ua),
+      browser:      detectBrowser(ua),
+      screenRes:    `${screen.width}×${screen.height} (${screen.colorDepth}bit)`,
+      cpuCores:     navigator.hardwareConcurrency ?? 0,
+      ramGB:        (navigator as any).deviceMemory ?? 0,
+      gpu:          gpu.length > 80 ? gpu.slice(0, 80) + '…' : gpu,
+      language:     navigator.language,
+      timezone:     Intl.DateTimeFormat().resolvedOptions().timeZone,
+      touchSupport: touch,
+      userAgent:    ua.slice(0, 250),
+    };
+  } catch {
+    return {
+      deviceType: 'Unknown', os: 'Unknown', browser: 'Unknown',
+      screenRes: '', cpuCores: 0, ramGB: 0, gpu: '',
+      language: '', timezone: '', touchSupport: false, userAgent: '',
+    };
+  }
+}
+
 // ── 기기 핑거프린트 생성 (메인) ─────────────────────────────────────────
 export async function generateDeviceFingerprint(): Promise<string> {
   // 웹 환경이 아닐 경우 폴백
