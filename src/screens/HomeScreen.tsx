@@ -6,7 +6,8 @@ import {
 import { UserProfile } from '../types';
 
 interface Props {
-  navigation: any;
+  navigation:  any;
+  onGoToGate?: () => void;  // 기기 인증 화면으로 돌아가기
 }
 
 const GENDER_OPTIONS: { value: UserProfile['gender']; label: string }[] = [
@@ -31,7 +32,7 @@ const C = {
   errorRed:   '#d32f2f',
 };
 
-export const HomeScreen: React.FC<Props> = ({ navigation }) => {
+export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
   const [agreed, setAgreed] = useState(false);
   const [name,   setName]   = useState('');
   const [age,    setAge]    = useState('');
@@ -222,6 +223,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       <TouchableOpacity style={styles.demoButton} onPress={handleDemoResult}>
         <Text style={styles.demoButtonText}>결과 화면 미리보기 (데모)</Text>
       </TouchableOpacity>
+
+      {/* ── 기기 인증 화면으로 ──────────────────────────────────── */}
+      {onGoToGate && (
+        <TouchableOpacity style={styles.gateButton} onPress={onGoToGate}>
+          <Text style={styles.gateButtonText}>🔐 기기 인증 화면으로</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.bottomSpacer} />
     </ScrollView>
@@ -514,8 +522,20 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: C.border,
     backgroundColor: 'transparent',
+    marginBottom: 10,
   },
   demoButtonText: { color: C.textSec, fontSize: 14, fontWeight: '500' },
+
+  gateButton: {
+    paddingVertical: 11,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#b0bec5',
+    backgroundColor: 'transparent',
+  },
+  gateButtonText: { color: '#90a4ae', fontSize: 13, fontWeight: '500' },
 
   bottomSpacer: { height: 20 },
 });

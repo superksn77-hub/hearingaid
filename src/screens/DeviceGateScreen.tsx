@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { generateDeviceFingerprint } from '../utils/deviceFingerprint';
 import { checkDeviceStatus, registerDevice, DeviceStatus, getBackendMode } from '../services/deviceLicense';
-import { IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
 
 interface Props {
   onApproved:   () => void;   // 승인 완료 → 메인 앱 진입
@@ -19,7 +18,7 @@ interface Props {
 type GateState =
   | 'loading'   // 핑거프린트 생성 중
   | 'checking'  // Firebase/localStorage 확인 중
-  | 'approved'  // 승인됨 (onApproved 호출)
+  | 'approved'  // 승인됨 — 버튼 클릭 대기
   | 'pending'   // 승인 대기 중
   | 'blocked'   // 차단됨
   | 'error';    // 오류
@@ -34,6 +33,7 @@ const C = {
   redDark:  '#b71c1c',
   orange:   '#ff6f00',
   green:    '#00c853',
+  greenDark:'#1b5e20',
   white:    '#ffffff',
   muted:    '#546e7a',
   dim:      '#37474f',
@@ -53,13 +53,14 @@ function copyToClipboard(text: string): void {
 }
 
 export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) => {
-  const [deviceId,   setDeviceId]   = useState('');
-  const [gateState,  setGateState]  = useState<GateState>('loading');
-  const [copied,     setCopied]     = useState(false);
-  const [mode,       setMode]       = useState<'firebase' | 'local'>('local');
-  const [userName,   setUserName]   = useState('');
-  const [nameError,  setNameError]  = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [deviceId,      setDeviceId]      = useState('');
+  const [gateState,     setGateState]     = useState<GateState>('loading');
+  const [copied,        setCopied]        = useState(false);
+  const [mode,          setMode]          = useState<'firebase' | 'local'>('local');
+  const [userName,      setUserName]      = useState('');
+  const [nameError,     setNameError]     = useState('');
+  const [submitting,    setSubmitting]    = useState(false);
+  const [nameSubmitted, setNameSubmitted] = useState(false);
 
   const init = useCallback(async () => {
     setGateState('loading');
@@ -72,12 +73,11 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
       const status: DeviceStatus | null = await checkDeviceStatus(id);
 
       if (status === 'approved') {
+        // 승인됨 → 자동 진입하지 않고 버튼 대기 화면 표시
         setGateState('approved');
-        onApproved();
         return;
       }
       if (status === null) {
-        // 신규 기기 — 이름 입력 화면으로 (pending 아직 등록 안 함)
         setGateState('pending');
       } else {
         setGateState(status);
@@ -86,7 +86,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
       console.error('[DeviceGate] 오류:', e);
       setGateState('error');
     }
-  }, [onApproved]);
+  }, []);
 
   // 이름 입력 후 등록 신청
   const handleSubmitName = useCallback(async () => {
@@ -99,6 +99,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     setSubmitting(true);
     try {
       await registerDevice(deviceId, name);
+      setNameSubmitted(true);
     } catch (e) {
       console.error('[DeviceGate] 등록 오류:', e);
     } finally {
@@ -112,15 +113,14 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     try {
       const status = await checkDeviceStatus(deviceId);
       if (status === 'approved') {
-        setGateState('approved');
-        onApproved();
+        setGateState('approved');   // 승인됨 화면으로 (자동 진입 X)
       } else {
         setGateState(status ?? 'pending');
       }
     } catch {
       setGateState('error');
     }
-  }, [deviceId, onApproved]);
+  }, [deviceId]);
 
   useEffect(() => { init(); }, [init]);
 
@@ -130,28 +130,58 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     setTimeout(() => setCopied(false), 2500);
   };
 
-  // 이름 등록 완료 여부 (registerDevice 호출된 적 있는지 로컬 체크)
-  const [nameSubmitted, setNameSubmitted] = useState(false);
-
-  const handleSubmitNameWrapped = async () => {
-    await handleSubmitName();
-    setNameSubmitted(true);
-  };
-
-  // ── 로딩 ────────────────────────────────────────────────────────────────
+  // ── 로딩 / 확인 중 ──────────────────────────────────────────────────────
   if (gateState === 'loading' || gateState === 'checking') {
     return (
       <View style={styles.centerContainer}>
-        <View style={styles.logoMini}>
-          <View style={styles.logoRing} />
-          <View style={styles.logoDot} />
-        </View>
+        <Logo />
         <Text style={styles.logoText}>HICOG 청력검사</Text>
         <ActivityIndicator size="large" color={C.cyan} style={{ marginTop: 32 }} />
         <Text style={styles.loadingText}>
           {gateState === 'loading' ? '기기 식별 중...' : '접근 권한 확인 중...'}
         </Text>
       </View>
+    );
+  }
+
+  // ── 승인됨 ──────────────────────────────────────────────────────────────
+  if (gateState === 'approved') {
+    return (
+      <ScrollView style={styles.scrollBg} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <Logo />
+          <Text style={styles.logoText}>HICOG 청력검사</Text>
+          <Text style={styles.logoSub}>기기 인증 시스템</Text>
+        </View>
+
+        <View style={[styles.card, { borderColor: C.green }]}>
+          {/* 승인 아이콘 */}
+          <View style={[styles.statusIcon, { backgroundColor: '#0a2a10', borderColor: C.green }]}>
+            <Text style={styles.statusIconText}>✓</Text>
+          </View>
+
+          <Text style={styles.titleText}>승인된 기기</Text>
+          <Text style={styles.subText}>
+            이 기기는 관리자에 의해 승인되었습니다.{'\n'}
+            아래 버튼을 눌러 청력검사를 시작하세요.
+          </Text>
+
+          {/* 기기 번호 */}
+          <DeviceIdBox deviceId={deviceId} copied={copied} onCopy={handleCopy} />
+
+          {/* 메인으로 가기 버튼 */}
+          <TouchableOpacity style={styles.enterBtn} onPress={onApproved}>
+            <Text style={styles.enterBtnText}>🏠 메인으로 가기</Text>
+          </TouchableOpacity>
+
+          {/* 백엔드 모드 */}
+          <ModeBadge mode={mode} />
+        </View>
+
+        <TouchableOpacity style={styles.adminBtn} onPress={onAdminOpen}>
+          <Text style={styles.adminBtnText}>관리자 패널 →</Text>
+        </TouchableOpacity>
+      </ScrollView>
     );
   }
 
@@ -192,20 +222,13 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
   return (
     <ScrollView style={styles.scrollBg} contentContainerStyle={styles.scrollContent}>
 
-      {/* 헤더 */}
       <View style={styles.header}>
-        <View style={styles.logoMini}>
-          <View style={styles.logoRing} />
-          <View style={styles.logoDot} />
-        </View>
+        <Logo />
         <Text style={styles.logoText}>HICOG 청력검사</Text>
         <Text style={styles.logoSub}>기기 인증 시스템</Text>
       </View>
 
-      {/* 상태 카드 */}
       <View style={styles.card}>
-
-        {/* 상태 아이콘 */}
         <View style={[styles.statusIcon, { backgroundColor: '#2e1500', borderColor: C.orange }]}>
           <Text style={styles.statusIconText}>🔒</Text>
         </View>
@@ -220,7 +243,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
             : '이름을 입력하고 등록 신청을 하세요.\n관리자가 이름과 기기 번호를 확인 후 승인합니다.'}
         </Text>
 
-        {/* ── 이름 입력 (미제출 상태) ── */}
+        {/* 이름 입력 */}
         {!nameSubmitted && (
           <View style={styles.nameSection}>
             <Text style={styles.nameLabel}>사용자 이름</Text>
@@ -231,13 +254,13 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
               value={userName}
               onChangeText={text => { setUserName(text); setNameError(''); }}
               returnKeyType="done"
-              onSubmitEditing={handleSubmitNameWrapped}
+              onSubmitEditing={handleSubmitName}
             />
             {!!nameError && <Text style={styles.nameErrorText}>{nameError}</Text>}
           </View>
         )}
 
-        {/* ── 제출 후 이름 표시 ── */}
+        {/* 이름 확인 */}
         {nameSubmitted && (
           <View style={styles.nameConfirmed}>
             <Text style={styles.nameConfirmedLabel}>등록 이름</Text>
@@ -254,7 +277,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
           {[
             { n: '1', t: '이름을 입력하고 [등록 신청] 버튼을 누르세요' },
             { n: '2', t: '관리자가 이름과 기기 번호를 확인 후 승인합니다' },
-            { n: '3', t: '승인 후 아래 [승인 확인] 버튼을 눌러 입장하세요' },
+            { n: '3', t: '승인 후 [승인 확인] 버튼을 눌러 입장하세요' },
           ].map(item => (
             <View key={item.n} style={styles.infoRow}>
               <View style={styles.infoNum}><Text style={styles.infoNumText}>{item.n}</Text></View>
@@ -263,11 +286,11 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
           ))}
         </View>
 
-        {/* 등록 신청 버튼 (이름 미제출 시) */}
+        {/* 등록 신청 버튼 */}
         {!nameSubmitted && (
           <TouchableOpacity
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
-            onPress={handleSubmitNameWrapped}
+            onPress={handleSubmitName}
             disabled={submitting}
           >
             {submitting
@@ -277,32 +300,40 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
           </TouchableOpacity>
         )}
 
-        {/* 승인 확인 버튼 (신청 완료 후) */}
+        {/* 승인 확인 버튼 */}
         {nameSubmitted && (
           <TouchableOpacity style={styles.retryBtn} onPress={handleCheckApproval}>
             <Text style={styles.retryBtnText}>✓ 승인 완료 확인</Text>
           </TouchableOpacity>
         )}
 
-        {/* 백엔드 모드 표시 */}
-        <View style={styles.modeBadge}>
-          <View style={[styles.modeDot, { backgroundColor: mode === 'firebase' ? C.green : C.orange }]} />
-          <Text style={styles.modeText}>
-            {mode === 'firebase' ? 'Firebase 서버 모드' : '로컬 테스트 모드 (Firebase 미설정)'}
-          </Text>
-        </View>
+        <ModeBadge mode={mode} />
       </View>
 
-      {/* 관리자 버튼 */}
       <TouchableOpacity style={styles.adminBtn} onPress={onAdminOpen}>
         <Text style={styles.adminBtnText}>관리자 패널 →</Text>
       </TouchableOpacity>
-
     </ScrollView>
   );
 };
 
-// ── 기기 번호 박스 컴포넌트 ────────────────────────────────────────────────
+// ── 서브 컴포넌트 ────────────────────────────────────────────────────────────
+const Logo: React.FC = () => (
+  <View style={styles.logoMini}>
+    <View style={styles.logoRing} />
+    <View style={styles.logoDot} />
+  </View>
+);
+
+const ModeBadge: React.FC<{ mode: 'firebase' | 'local' }> = ({ mode }) => (
+  <View style={styles.modeBadge}>
+    <View style={[styles.modeDot, { backgroundColor: mode === 'firebase' ? C.green : C.orange }]} />
+    <Text style={styles.modeText}>
+      {mode === 'firebase' ? 'Firebase 서버 모드' : '로컬 테스트 모드 (Firebase 미설정)'}
+    </Text>
+  </View>
+);
+
 const DeviceIdBox: React.FC<{
   deviceId: string;
   copied:   boolean;
@@ -324,63 +355,38 @@ const styles = StyleSheet.create({
   scrollBg:      { flex: 1, backgroundColor: C.bg },
   scrollContent: { padding: 24, paddingBottom: 60, alignItems: 'center' },
   centerContainer: {
-    flex: 1,
-    backgroundColor: C.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 28,
+    flex: 1, backgroundColor: C.bg,
+    alignItems: 'center', justifyContent: 'center', padding: 28,
   },
 
   // 로고
-  logoMini: {
-    width: 56, height: 56,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 10,
-  },
+  logoMini: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   logoRing: {
-    position: 'absolute',
-    width: 56, height: 56, borderRadius: 28,
+    position: 'absolute', width: 56, height: 56, borderRadius: 28,
     borderWidth: 3, borderColor: C.cyan,
     borderRightColor: 'transparent', borderBottomColor: 'transparent',
-    transform: [{ rotate: '-45deg' }],
-    opacity: 0.7,
+    transform: [{ rotate: '-45deg' }], opacity: 0.7,
   },
-  logoDot: {
-    width: 14, height: 14, borderRadius: 7,
-    backgroundColor: C.cyan,
-  },
-  logoText: {
-    fontSize: 22, fontWeight: 'bold', color: C.white,
-    letterSpacing: 0.4,
-  },
-  logoSub: {
-    fontSize: 12, color: C.muted, marginTop: 4, letterSpacing: 0.8,
-  },
-  loadingText: {
-    fontSize: 14, color: C.muted, marginTop: 14, letterSpacing: 0.3,
-  },
+  logoDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: C.cyan },
+  logoText: { fontSize: 22, fontWeight: 'bold', color: C.white, letterSpacing: 0.4 },
+  logoSub:  { fontSize: 12, color: C.muted, marginTop: 4, letterSpacing: 0.8 },
+  loadingText: { fontSize: 14, color: C.muted, marginTop: 14, letterSpacing: 0.3 },
 
   // 헤더
   header: { alignItems: 'center', marginBottom: 28, marginTop: 20 },
 
   // 카드
   card: {
-    backgroundColor: C.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.cardBdr,
-    padding: 24,
-    width: '100%',
-    maxWidth: 440,
-    alignItems: 'center',
+    backgroundColor: C.card, borderRadius: 20,
+    borderWidth: 1, borderColor: C.cardBdr,
+    padding: 24, width: '100%', maxWidth: 440, alignItems: 'center',
   },
 
   // 상태 아이콘
   statusIcon: {
     width: 64, height: 64, borderRadius: 32,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2,
-    marginBottom: 16,
+    borderWidth: 2, marginBottom: 16,
   },
   statusIconText: { fontSize: 28 },
 
@@ -398,14 +404,11 @@ const styles = StyleSheet.create({
   idContainer: { width: '100%', marginBottom: 20 },
   idLabel: {
     fontSize: 11, color: C.muted, fontWeight: '700',
-    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8,
-    textAlign: 'center',
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8, textAlign: 'center',
   },
   idBox: {
-    backgroundColor: C.idBg,
-    borderWidth: 1, borderColor: C.idBdr,
-    borderRadius: 10,
-    paddingVertical: 16, paddingHorizontal: 12,
+    backgroundColor: C.idBg, borderWidth: 1, borderColor: C.idBdr,
+    borderRadius: 10, paddingVertical: 16, paddingHorizontal: 12,
     alignItems: 'center', marginBottom: 10,
   },
   idValue: {
@@ -413,26 +416,23 @@ const styles = StyleSheet.create({
     letterSpacing: 4, fontVariant: ['tabular-nums'],
   },
   copyBtn: {
-    backgroundColor: C.blue,
-    borderRadius: 10, paddingVertical: 12,
-    alignItems: 'center',
+    backgroundColor: C.blue, borderRadius: 10, paddingVertical: 12, alignItems: 'center',
   },
-  copyBtnDone: { backgroundColor: '#1b5e20' },
+  copyBtnDone: { backgroundColor: C.greenDark },
   copyBtnText: { color: C.white, fontSize: 14, fontWeight: '700' },
 
   // 안내 박스
   infoBox: {
     backgroundColor: 'rgba(0,184,212,0.07)',
     borderWidth: 1, borderColor: 'rgba(0,184,212,0.20)',
-    borderRadius: 12, padding: 16,
-    width: '100%', marginBottom: 20,
+    borderRadius: 12, padding: 16, width: '100%', marginBottom: 20,
   },
   infoTitle: {
     fontSize: 12, fontWeight: '700', color: C.cyan,
     letterSpacing: 0.8, marginBottom: 12, textTransform: 'uppercase',
   },
-  infoRow:  { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, gap: 10 },
-  infoNum:  {
+  infoRow:     { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, gap: 10 },
+  infoNum:     {
     width: 22, height: 22, borderRadius: 11,
     backgroundColor: 'rgba(0,184,212,0.25)', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0, marginTop: 1,
@@ -441,67 +441,58 @@ const styles = StyleSheet.create({
   infoText:    { fontSize: 13, color: '#90a4ae', lineHeight: 20, flex: 1 },
 
   // 이름 입력
-  nameSection: {
-    width: '100%', marginBottom: 16,
-  },
+  nameSection: { width: '100%', marginBottom: 16 },
   nameLabel: {
     fontSize: 11, color: C.muted, fontWeight: '700',
     letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8,
   },
   nameInput: {
-    backgroundColor: C.idBg,
-    borderWidth: 1.5, borderColor: C.idBdr,
-    borderRadius: 10,
-    color: C.white, fontSize: 16,
+    backgroundColor: C.idBg, borderWidth: 1.5, borderColor: C.idBdr,
+    borderRadius: 10, color: C.white, fontSize: 16,
     paddingHorizontal: 14, paddingVertical: 13,
   },
-  nameInputError: {
-    borderColor: C.red,
-  },
-  nameErrorText: {
-    color: C.red, fontSize: 12, marginTop: 6, textAlign: 'center',
-  },
+  nameInputError:  { borderColor: C.red },
+  nameErrorText:   { color: C.red, fontSize: 12, marginTop: 6, textAlign: 'center' },
   nameConfirmed: {
     width: '100%',
     backgroundColor: 'rgba(0,200,83,0.08)',
     borderWidth: 1, borderColor: 'rgba(0,200,83,0.30)',
-    borderRadius: 10, padding: 14,
-    alignItems: 'center', marginBottom: 16,
+    borderRadius: 10, padding: 14, alignItems: 'center', marginBottom: 16,
   },
   nameConfirmedLabel: {
     fontSize: 10, color: C.green, fontWeight: '700',
     letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6,
   },
-  nameConfirmedValue: {
-    fontSize: 18, fontWeight: '800', color: C.white,
-  },
+  nameConfirmedValue: { fontSize: 18, fontWeight: '800', color: C.white },
 
-  // 등록 신청 버튼
+  // 버튼들
+  enterBtn: {
+    backgroundColor: C.green, borderRadius: 14,
+    paddingVertical: 16, paddingHorizontal: 24,
+    width: '100%', alignItems: 'center', marginBottom: 12,
+    shadowColor: C.green, shadowOpacity: 0.35, shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 }, elevation: 6,
+  },
+  enterBtnText: { color: '#001a00', fontSize: 17, fontWeight: '900', letterSpacing: 0.3 },
+
   submitBtn: {
     backgroundColor: C.cyan, borderRadius: 12,
-    paddingVertical: 14, paddingHorizontal: 24,
-    width: '100%', alignItems: 'center', marginBottom: 12,
-    minHeight: 50, justifyContent: 'center',
+    paddingVertical: 14, width: '100%', alignItems: 'center',
+    marginBottom: 12, minHeight: 50, justifyContent: 'center',
   },
-  submitBtnDisabled: {
-    opacity: 0.6,
-  },
+  submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: C.bg, fontSize: 15, fontWeight: '800' },
 
-  // 버튼
   retryBtn: {
     backgroundColor: C.blue, borderRadius: 12,
-    paddingVertical: 14, paddingHorizontal: 24,
-    width: '100%', alignItems: 'center', marginBottom: 12,
+    paddingVertical: 14, width: '100%', alignItems: 'center', marginBottom: 12,
   },
   retryBtnText: { color: C.white, fontSize: 15, fontWeight: '700' },
 
-  // 백엔드 모드
-  modeBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4,
-  },
-  modeDot: { width: 7, height: 7, borderRadius: 4 },
-  modeText: { fontSize: 11, color: C.dim },
+  // 모드 배지
+  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  modeDot:   { width: 7, height: 7, borderRadius: 4 },
+  modeText:  { fontSize: 11, color: C.dim },
 
   // 관리자 버튼
   adminBtn: {
