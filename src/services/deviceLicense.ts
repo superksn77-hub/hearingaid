@@ -38,6 +38,7 @@ export interface DeviceRecord {
   deviceId:     string;
   status:       DeviceStatus;
   label:        string;
+  userName?:    string;   // 사용자가 입력한 이름
   registeredAt: string;
   approvedAt?:  string;
   userAgent?:   string;
@@ -81,11 +82,12 @@ export async function checkDeviceStatus(deviceId: string): Promise<DeviceStatus 
 }
 
 /** 기기를 pending 상태로 등록 */
-export async function registerDevice(deviceId: string): Promise<void> {
+export async function registerDevice(deviceId: string, userName?: string): Promise<void> {
   const record: DeviceRecord = {
     deviceId,
     status:       'pending',
     label:        '',
+    userName:     userName ?? '',
     registeredAt: new Date().toISOString(),
     userAgent:    typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : '',
     screenInfo:   typeof screen    !== 'undefined' ? `${screen.width}x${screen.height}` : '',
@@ -98,6 +100,11 @@ export async function registerDevice(deviceId: string): Promise<void> {
       const snap = await getDoc(ref);
       if (!snap.exists()) {
         await setDoc(ref, { ...record, registeredAt: serverTimestamp() });
+      } else {
+        // 이미 등록된 경우 이름만 업데이트
+        if (userName) {
+          await updateDoc(ref, { userName });
+        }
       }
       return;
     } catch (e) {
@@ -108,8 +115,10 @@ export async function registerDevice(deviceId: string): Promise<void> {
   const local = localRead();
   if (!local[deviceId]) {
     local[deviceId] = record;
-    localWrite(local);
+  } else if (userName) {
+    local[deviceId].userName = userName;
   }
+  localWrite(local);
 }
 
 /** 전체 기기 목록 (관리자용) */

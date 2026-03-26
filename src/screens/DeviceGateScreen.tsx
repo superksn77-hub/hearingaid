@@ -5,7 +5,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Platform, ScrollView,
+  ActivityIndicator, Platform, ScrollView, TextInput,
 } from 'react-native';
 import { generateDeviceFingerprint } from '../utils/deviceFingerprint';
 import { checkDeviceStatus, registerDevice, DeviceStatus, getBackendMode } from '../services/deviceLicense';
@@ -53,10 +53,13 @@ function copyToClipboard(text: string): void {
 }
 
 export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) => {
-  const [deviceId,  setDeviceId]  = useState('');
-  const [gateState, setGateState] = useState<GateState>('loading');
-  const [copied,    setCopied]    = useState(false);
-  const [mode,      setMode]      = useState<'firebase' | 'local'>('local');
+  const [deviceId,   setDeviceId]   = useState('');
+  const [gateState,  setGateState]  = useState<GateState>('loading');
+  const [copied,     setCopied]     = useState(false);
+  const [mode,       setMode]       = useState<'firebase' | 'local'>('local');
+  const [userName,   setUserName]   = useState('');
+  const [nameError,  setNameError]  = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const init = useCallback(async () => {
     setGateState('loading');
@@ -74,7 +77,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
         return;
       }
       if (status === null) {
-        await registerDevice(id);
+        // 신규 기기 — 이름 입력 화면으로 (pending 아직 등록 안 함)
         setGateState('pending');
       } else {
         setGateState(status);
@@ -85,12 +88,54 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     }
   }, [onApproved]);
 
+  // 이름 입력 후 등록 신청
+  const handleSubmitName = useCallback(async () => {
+    const name = userName.trim();
+    if (!name) {
+      setNameError('이름을 입력해주세요.');
+      return;
+    }
+    setNameError('');
+    setSubmitting(true);
+    try {
+      await registerDevice(deviceId, name);
+    } catch (e) {
+      console.error('[DeviceGate] 등록 오류:', e);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [deviceId, userName]);
+
+  // 승인 완료 재확인
+  const handleCheckApproval = useCallback(async () => {
+    setGateState('checking');
+    try {
+      const status = await checkDeviceStatus(deviceId);
+      if (status === 'approved') {
+        setGateState('approved');
+        onApproved();
+      } else {
+        setGateState(status ?? 'pending');
+      }
+    } catch {
+      setGateState('error');
+    }
+  }, [deviceId, onApproved]);
+
   useEffect(() => { init(); }, [init]);
 
   const handleCopy = () => {
     copyToClipboard(deviceId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
+  };
+
+  // 이름 등록 완료 여부 (registerDevice 호출된 적 있는지 로컬 체크)
+  const [nameSubmitted, setNameSubmitted] = useState(false);
+
+  const handleSubmitNameWrapped = async () => {
+    await handleSubmitName();
+    setNameSubmitted(true);
   };
 
   // ── 로딩 ────────────────────────────────────────────────────────────────
@@ -166,14 +211,39 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
         </View>
 
         <Text style={styles.titleText}>
-          {gateState === 'pending' ? '승인 대기 중' : '미등록 기기'}
+          {nameSubmitted ? '승인 대기 중' : '접근 권한 신청'}
         </Text>
 
         <Text style={styles.subText}>
-          {gateState === 'pending'
-            ? '이 기기는 관리자의 승인을 기다리고 있습니다.\n아래 기기 번호를 관리자에게 전달하세요.'
-            : '이 기기는 등록되지 않았습니다.\n아래 기기 번호를 관리자에게 전달하여\n접근 권한을 요청하세요.'}
+          {nameSubmitted
+            ? '등록 신청이 완료되었습니다.\n관리자 승인 후 아래 버튼을 눌러 확인하세요.'
+            : '이름을 입력하고 등록 신청을 하세요.\n관리자가 이름과 기기 번호를 확인 후 승인합니다.'}
         </Text>
+
+        {/* ── 이름 입력 (미제출 상태) ── */}
+        {!nameSubmitted && (
+          <View style={styles.nameSection}>
+            <Text style={styles.nameLabel}>사용자 이름</Text>
+            <TextInput
+              style={[styles.nameInput, !!nameError && styles.nameInputError]}
+              placeholder="이름을 입력하세요 (예: 홍길동)"
+              placeholderTextColor={C.muted}
+              value={userName}
+              onChangeText={text => { setUserName(text); setNameError(''); }}
+              returnKeyType="done"
+              onSubmitEditing={handleSubmitNameWrapped}
+            />
+            {!!nameError && <Text style={styles.nameErrorText}>{nameError}</Text>}
+          </View>
+        )}
+
+        {/* ── 제출 후 이름 표시 ── */}
+        {nameSubmitted && (
+          <View style={styles.nameConfirmed}>
+            <Text style={styles.nameConfirmedLabel}>등록 이름</Text>
+            <Text style={styles.nameConfirmedValue}>👤 {userName.trim()}</Text>
+          </View>
+        )}
 
         {/* 기기 번호 */}
         <DeviceIdBox deviceId={deviceId} copied={copied} onCopy={handleCopy} />
@@ -182,9 +252,9 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
         <View style={styles.infoBox}>
           <Text style={styles.infoTitle}>등록 절차</Text>
           {[
-            { n: '1', t: '위 기기 번호를 복사하세요' },
-            { n: '2', t: '관리자에게 기기 번호를 전달하세요' },
-            { n: '3', t: '관리자가 승인하면 아래 버튼을 눌러 확인하세요' },
+            { n: '1', t: '이름을 입력하고 [등록 신청] 버튼을 누르세요' },
+            { n: '2', t: '관리자가 이름과 기기 번호를 확인 후 승인합니다' },
+            { n: '3', t: '승인 후 아래 [승인 확인] 버튼을 눌러 입장하세요' },
           ].map(item => (
             <View key={item.n} style={styles.infoRow}>
               <View style={styles.infoNum}><Text style={styles.infoNumText}>{item.n}</Text></View>
@@ -193,10 +263,26 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
           ))}
         </View>
 
-        {/* 승인 확인 버튼 */}
-        <TouchableOpacity style={styles.retryBtn} onPress={init}>
-          <Text style={styles.retryBtnText}>승인 완료 확인</Text>
-        </TouchableOpacity>
+        {/* 등록 신청 버튼 (이름 미제출 시) */}
+        {!nameSubmitted && (
+          <TouchableOpacity
+            style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+            onPress={handleSubmitNameWrapped}
+            disabled={submitting}
+          >
+            {submitting
+              ? <ActivityIndicator size="small" color={C.white} />
+              : <Text style={styles.submitBtnText}>📋 등록 신청</Text>
+            }
+          </TouchableOpacity>
+        )}
+
+        {/* 승인 확인 버튼 (신청 완료 후) */}
+        {nameSubmitted && (
+          <TouchableOpacity style={styles.retryBtn} onPress={handleCheckApproval}>
+            <Text style={styles.retryBtnText}>✓ 승인 완료 확인</Text>
+          </TouchableOpacity>
+        )}
 
         {/* 백엔드 모드 표시 */}
         <View style={styles.modeBadge}>
@@ -353,6 +439,54 @@ const styles = StyleSheet.create({
   },
   infoNumText: { fontSize: 11, fontWeight: '900', color: C.cyan },
   infoText:    { fontSize: 13, color: '#90a4ae', lineHeight: 20, flex: 1 },
+
+  // 이름 입력
+  nameSection: {
+    width: '100%', marginBottom: 16,
+  },
+  nameLabel: {
+    fontSize: 11, color: C.muted, fontWeight: '700',
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8,
+  },
+  nameInput: {
+    backgroundColor: C.idBg,
+    borderWidth: 1.5, borderColor: C.idBdr,
+    borderRadius: 10,
+    color: C.white, fontSize: 16,
+    paddingHorizontal: 14, paddingVertical: 13,
+  },
+  nameInputError: {
+    borderColor: C.red,
+  },
+  nameErrorText: {
+    color: C.red, fontSize: 12, marginTop: 6, textAlign: 'center',
+  },
+  nameConfirmed: {
+    width: '100%',
+    backgroundColor: 'rgba(0,200,83,0.08)',
+    borderWidth: 1, borderColor: 'rgba(0,200,83,0.30)',
+    borderRadius: 10, padding: 14,
+    alignItems: 'center', marginBottom: 16,
+  },
+  nameConfirmedLabel: {
+    fontSize: 10, color: C.green, fontWeight: '700',
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6,
+  },
+  nameConfirmedValue: {
+    fontSize: 18, fontWeight: '800', color: C.white,
+  },
+
+  // 등록 신청 버튼
+  submitBtn: {
+    backgroundColor: C.cyan, borderRadius: 12,
+    paddingVertical: 14, paddingHorizontal: 24,
+    width: '100%', alignItems: 'center', marginBottom: 12,
+    minHeight: 50, justifyContent: 'center',
+  },
+  submitBtnDisabled: {
+    opacity: 0.6,
+  },
+  submitBtnText: { color: C.bg, fontSize: 15, fontWeight: '800' },
 
   // 버튼
   retryBtn: {

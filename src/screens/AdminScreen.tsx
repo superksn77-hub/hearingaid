@@ -281,6 +281,18 @@ const DeviceCard: React.FC<{
         <Text style={styles.deviceId} selectable>{device.deviceId}</Text>
       </View>
 
+      {/* 사용자 이름 */}
+      {device.userName ? (
+        <View style={styles.userNameBox}>
+          <Text style={styles.userNameIcon}>👤</Text>
+          <Text style={styles.userNameText}>{device.userName}</Text>
+        </View>
+      ) : (
+        <View style={styles.userNameBoxEmpty}>
+          <Text style={styles.userNameEmptyText}>이름 미입력</Text>
+        </View>
+      )}
+
       {/* 메타 정보 */}
       <Text style={styles.deviceMeta}>등록: {dateStr(device.registeredAt)}</Text>
       {device.approvedAt && (
@@ -398,6 +410,22 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: { fontSize: 11, fontWeight: '700' },
   deviceId: { fontSize: 14, fontWeight: '700', color: C.cyan, letterSpacing: 1, flex: 1 },
+  userNameBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(30,136,229,0.12)',
+    borderWidth: 1, borderColor: 'rgba(30,136,229,0.30)',
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7,
+    marginBottom: 10, alignSelf: 'flex-start',
+  },
+  userNameIcon: { fontSize: 14 },
+  userNameText: { fontSize: 15, fontWeight: '800', color: C.white },
+  userNameBoxEmpty: {
+    backgroundColor: 'rgba(84,110,122,0.10)',
+    borderWidth: 1, borderColor: 'rgba(84,110,122,0.20)',
+    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+    marginBottom: 10, alignSelf: 'flex-start',
+  },
+  userNameEmptyText: { fontSize: 11, color: C.muted, fontStyle: 'italic' },
   deviceMeta: { fontSize: 11, color: C.muted, marginBottom: 2 },
   deviceUA: { fontSize: 10, color: C.dim, marginTop: 4, marginBottom: 8, lineHeight: 14 },
 
