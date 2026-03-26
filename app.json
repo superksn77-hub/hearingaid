@@ -30,6 +30,9 @@
       "favicon": "./assets/favicon.png",
       "publicPath": "/hearingaid/"
     },
+    "experiments": {
+      "baseUrl": "/hearingaid"
+    },
     "plugins": [
       "expo-asset"
     ]
