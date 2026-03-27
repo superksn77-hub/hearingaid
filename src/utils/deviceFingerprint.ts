@@ -1,21 +1,21 @@
 /**
  * 브라우저 환경에서 기기 고유 번호(Device Fingerprint)를 생성합니다.
  *
- * ▸ 핵심 원칙: 쿠키·localStorage 와 무관하게 하드웨어 신호 + 사용자 이름으로
- *   결정론적(deterministic) ID를 생성합니다.
- *   같은 사람이 같은 컴퓨터를 쓰면 항상 동일한 ID가 나옵니다.
+ * ▸ 핵심 원칙: 컴퓨터 하드웨어 신호만으로 결정론적(deterministic) ID를 생성합니다.
+ *   사용자 이름·쿠키·localStorage 와 완전히 무관합니다.
+ *   같은 컴퓨터라면 누가 접속해도, 언제 접속해도 항상 동일한 ID가 나옵니다.
  *
- * 구성 요소:
- *   사용자 이름  – 같은 컴퓨터라도 사용자별로 다른 ID 부여
- *   WebGL GPU   – 그래픽카드 벤더·렌더러 (매우 안정적)
- *   화면 해상도  – 가로×세로×색상깊이
- *   CPU 코어수   – navigator.hardwareConcurrency
- *   RAM 크기     – navigator.deviceMemory (지원 브라우저)
- *   타임존       – Asia/Seoul 등
- *   언어         – ko-KR 등
- *   플랫폼       – Win32 / MacIntel / Linux x86_64 등
+ * 구성 요소 (모두 하드웨어/시스템 고유값):
+ *   WebGL GPU      – 그래픽카드 벤더·렌더러 (가장 고유하고 안정적)
+ *   화면 해상도     – 가로×세로×색상깊이×픽셀깊이
+ *   CPU 코어수      – navigator.hardwareConcurrency
+ *   RAM 크기        – navigator.deviceMemory
+ *   타임존          – Asia/Seoul 등 (OS 설정값)
+ *   언어            – ko-KR 등 (OS/브라우저 설정)
+ *   플랫폼          – Win32 / MacIntel / Linux x86_64
+ *   WebGL 파라미터  – MAX_TEXTURE_SIZE 등 GPU 세부 스펙
  *
- * 결과 포맷: XXXX-XXXX-XXXX-XXXX
+ * 결과 포맷: XXXX-XXXX-XXXX-XXXX (대문자 hex)
  */
 
 // ── SHA-256 해시 ──────────────────────────────────────────────────────────
@@ -37,13 +37,14 @@ async function sha256(text: string): Promise<string> {
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// ── WebGL 핑거프린트 (GPU 정보) ──────────────────────────────────────────
+// ── WebGL 상세 핑거프린트 ────────────────────────────────────────────────
 function webglFp(): string {
   try {
     const c  = document.createElement('canvas');
     const gl = (c.getContext('webgl') ??
                 c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
     if (!gl) return 'no-webgl';
+
     const ext      = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer = ext
       ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
@@ -51,7 +52,13 @@ function webglFp(): string {
     const vendor   = ext
       ? String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL))
       : String(gl.getParameter(gl.VENDOR));
-    return `${vendor}||${renderer}`;
+
+    // GPU 세부 스펙 — 같은 모델이라도 드라이버 수준에서 차이 발생
+    const maxTex   = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    const maxVert  = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+    const maxFrag  = gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS);
+
+    return `${vendor}|${renderer}|${maxTex}|${maxVert}|${maxFrag}`;
   } catch (_) { return 'no-webgl'; }
 }
 
@@ -139,39 +146,32 @@ export function collectDeviceInfo(): DeviceInfo {
 
 // ── 기기 핑거프린트 생성 (메인) ─────────────────────────────────────────
 /**
- * 하드웨어 신호 + 사용자 이름을 조합해 결정론적 기기 ID를 반환합니다.
+ * 컴퓨터 하드웨어 신호만으로 결정론적 기기 ID를 반환합니다.
+ * 사용자 이름·쿠키·localStorage 와 완전히 무관합니다.
  *
- * @param userName  사용자가 입력한 이름 (비어있으면 하드웨어만 사용)
- *
- * 동작 방식:
- *  1) SHA256(이름 + GPU + 해상도 + CPU코어 + RAM + 타임존 + 언어 + 플랫폼)
- *  2) 쿠키/localStorage 와 무관 — 삭제해도 같은 결과
- *  3) 같은 사람이 같은 컴퓨터 → 항상 동일한 ID
- *  4) localStorage 에도 캐시 저장 (성능용, 의존하지 않음)
+ * 동일한 컴퓨터라면:
+ *  - 사용자가 달라도  → 같은 ID
+ *  - 쿠키를 지워도   → 같은 ID
+ *  - 앱을 업데이트해도 → 같은 ID
+ *  - 브라우저를 업데이트해도 → 같은 ID
  */
-export async function generateDeviceFingerprint(userName = ''): Promise<string> {
-  // 웹 환경이 아닌 경우 고정 폴백
+export async function generateDeviceFingerprint(): Promise<string> {
   if (typeof document === 'undefined') {
     return 'MOBL-0000-0000-0001';
   }
 
-  const gpu  = webglFp();
+  const gpu  = webglFp();   // GPU 벤더 + 렌더러 + 스펙 파라미터
   const scr  = `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth ?? 0}`;
   const cpu  = `${navigator.hardwareConcurrency ?? 0}`;
   const ram  = `${(navigator as any).deviceMemory ?? 0}`;
   const tz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const lang = navigator.language;
+  // userAgentData.platform이 더 정확 (Win32→Windows, 아이폰→iPhone)
   const plat = ((navigator as any).userAgentData?.platform ?? navigator.platform ?? '');
 
-  // 이름을 첫 번째로 넣어 사용자별 고유성 확보
-  const raw  = [userName.trim(), gpu, scr, cpu, ram, tz, lang, plat].join('|||');
+  const raw  = [gpu, scr, cpu, ram, tz, lang, plat].join('|||');
   const hash = await sha256(raw);
   const h16  = hash.substring(0, 16).toUpperCase();
-  const deviceId =
-    `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
 
-  // 성능용 캐시 (의존하지 않음 — 삭제돼도 재계산하면 같은 값)
-  try { localStorage.setItem('hicog_device_id_v3', deviceId); } catch (_) {}
-
-  return deviceId;
+  return `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
 }
