@@ -14,20 +14,22 @@ const NOISE_DURATION    = 500;
 const NOISE_AMPLITUDE   = 0.20;
 const GAP_POSITION_MIN  = 100;
 const GAP_POSITION_MAX  = 350;
-const CATCH_RATIO       = 0.30;
+const CATCH_RATIO       = 0.20;  // 20%로 줄여서 검사 단축
 const ISI_MIN           = 800;
 const ISI_MAX           = 2000;
 const RESPONSE_WINDOW   = 1500;
-const PRACTICE_TRIALS   = 3;
+const PRACTICE_TRIALS   = 2;
+const TOTAL_DISPLAY     = 30;    // 사용자에게 보이는 총 시행 수
 
+// 스크리닝 목적: 최대 30시행, 6 reversal 수렴
 const STAIRCASE_CONFIG = {
   initial: 10,
   stepFactor: 1.41,
   minVal: 0.5,
   maxVal: 30,
   nDown: 2,
-  targetReversals: 8,
-  maxTrials: 60,
+  targetReversals: 6,
+  maxTrials: 30,
 };
 
 export type GDTEvent =
@@ -78,14 +80,13 @@ export class GDTEngine {
 
     // 본 검사
     const staircase = new AdaptiveStaircase(STAIRCASE_CONFIG);
-    let realTrialNum = 0;
-    let totalAttempts = 0;
-    const MAX_TOTAL_ATTEMPTS = 80; // catch 포함 절대 상한
+    let trialNum = 0;
 
-    while (this.isRunning && totalAttempts < MAX_TOTAL_ATTEMPTS) {
-      totalAttempts++;
+    while (this.isRunning && trialNum < TOTAL_DISPLAY) {
+      trialNum++;
+      this.emit({ type: 'progress', current: trialNum, total: TOTAL_DISPLAY });
 
-      // 30% catch trial (카운터 증가 없이)
+      // 20% catch trial
       const isCatch = Math.random() < CATCH_RATIO;
 
       if (isCatch) {
@@ -96,14 +97,11 @@ export class GDTEngine {
         } else {
           this.emit({ type: 'correct_rejection' });
         }
-        continue;
+        continue; // catch는 계단법에 반영 안 함
       }
 
       // 실제 시행
       const gapMs = staircase.getValue();
-      realTrialNum++;
-      this.emit({ type: 'progress', current: realTrialNum, total: STAIRCASE_CONFIG.maxTrials });
-
       const detected = await this.runOneTrial(gapMs, true);
       if (!this.isRunning) break;
 
