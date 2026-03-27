@@ -96,7 +96,8 @@ function detectPattern(thresholds: Partial<Record<TestFrequency, number>>) {
   return { hasNotch4k, hasHighFreqSlope, hasLowFreqLoss, isFlat };
 }
 
-function analyzeHealthRisks(result: TestResult): HealthRisk[] {
+function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: string): HealthRisk[] {
+  // ── 기본 지표 ─────────────────────────────────────────────────────
   const rightPTA = getPTA(result.right);
   const leftPTA  = getPTA(result.left);
   const avgPTA   = (rightPTA !== null && leftPTA !== null)
@@ -107,158 +108,380 @@ function analyzeHealthRisks(result: TestResult): HealthRisk[] {
 
   const rP = detectPattern(result.right);
   const lP = detectPattern(result.left);
-
-  const hasNotch4k      = rP.hasNotch4k      || lP.hasNotch4k;
+  const hasNotch4k       = rP.hasNotch4k      || lP.hasNotch4k;
   const hasHighFreqSlope = rP.hasHighFreqSlope || lP.hasHighFreqSlope;
   const hasLowFreqLoss   = rP.hasLowFreqLoss  || lP.hasLowFreqLoss;
   const isFlat           = rP.isFlat          || lP.isFlat;
 
+  // ── 주파수 대역별 평균 (논문 기반) ────────────────────────────────
+  const _avg = (vals: (number|undefined)[]) => {
+    const v = vals.filter((x): x is number => x !== undefined);
+    return v.length > 0 ? v.reduce((a,b)=>a+b,0)/v.length : 0;
+  };
+  // 고주파 (3000~8000 Hz): 심혈관·말초신경병증 지표
+  const highFreqAvg = _avg([
+    result.right[4000], result.right[8000],
+    result.left[4000],  result.left[8000],
+  ]);
+  // 저중주파 (500~2000 Hz): HDL·신기능·인지 지표
+  const lowMidAvg = _avg([
+    result.right[500], result.right[1000], result.right[2000],
+    result.left[500],  result.left[1000],  result.left[2000],
+  ]);
+  // 초고주파 (4000+8000): CHD·SLE·골다공증 지표
+  const ultraHighAvg = _avg([
+    result.right[4000], result.right[8000],
+    result.left[4000],  result.left[8000],
+  ]);
+
+  // ── 연령·성별 변수 ────────────────────────────────────────────────
+  const age        = ageStr ? parseInt(ageStr, 10) : undefined;
+  const hasAge     = age !== undefined && !isNaN(age) && age > 0;
+  const isFemale   = genderArg === 'female';
+  const isMale     = genderArg === 'male';
+
+  const isChild          = hasAge && age! < 18;
+  const isYoungAdult     = hasAge && age! >= 18 && age! < 40;
+  const isMiddleAge      = hasAge && age! >= 40 && age! < 60;
+  const isSenior         = hasAge && age! >= 60 && age! < 70;
+  const isElderly        = hasAge && age! >= 70;
+  const isSeniorPlus     = hasAge && age! >= 60;
+  const isReproductiveF  = isFemale && hasAge && age! >= 15 && age! < 50;
+  const isPostMenopausal = isFemale && hasAge && age! >= 50;
+
   const risks: HealthRisk[] = [];
 
+  // ══════════════════════════════════════════════════════════════════
   // ① 비대칭 난청 — 긴급 (최우선)
+  // ══════════════════════════════════════════════════════════════════
   if (asymmetry >= 15) {
     risks.push({
-      id: 'asymmetry',
-      icon: '🚨',
-      title: '비대칭 난청 — 전문의 즉시 방문 권고',
-      subtitle: `좌우 청력 차이 ${asymmetry} dB`,
+      id: 'asymmetry', icon: '🚨',
+      title: '비대칭 난청 — 즉시 전문의 방문 권고',
+      subtitle: `좌우 차이 ${asymmetry} dB HL`,
       level: 'alert',
-      description: '양쪽 귀 청력 차이가 15 dB 이상이면 청신경종·뇌졸중 가능성을 반드시 배제해야 합니다.',
-      detail: `우측 ${rightPTA ?? '-'} dB HL vs 좌측 ${leftPTA ?? '-'} dB HL로 ${asymmetry} dB 차이가 확인되었습니다. 비대칭 감각신경성 난청은 청신경종(전정신경초종), 뇌졸중, 혈관 병변 등의 가능성을 시사합니다. 이비인후과에서 MRI(청신경 조영증강) 및 정밀 청각 검사를 받으시기 바랍니다.`,
+      description: '양쪽 귀 15 dB 이상 차이는 청신경종·뇌졸중 가능성을 반드시 배제해야 합니다.',
+      detail: `우측 ${rightPTA ?? '-'} dB HL vs 좌측 ${leftPTA ?? '-'} dB HL — ${asymmetry} dB 차이 확인. 비대칭 감각신경성 난청은 청신경종(전정신경초종), 뇌졸중, 내이도 혈관 병변의 가능성을 시사합니다. 이비인후과에서 MRI(청신경 조영증강) 및 정밀 청각검사를 즉시 받으시기 바랍니다.${isChild ? ' 소아의 경우 선천성 이상 여부도 함께 확인이 필요합니다.' : ''}`,
       source: 'ASHA 청력 선별 가이드라인 · 임상 청각학 기준',
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════
   // ② 소음성 난청 (4 kHz 노치)
+  // ══════════════════════════════════════════════════════════════════
   if (hasNotch4k) {
+    const ageNote = isChild
+      ? ' 소아·청소년의 4 kHz 노치는 이어폰·헤드폰 과다 사용, 공연장 소음 노출이 주요 원인입니다.'
+      : isYoungAdult
+        ? ' 20~30대의 4 kHz 노치는 직업적 소음뿐 아니라 고음량 음악(이어폰, 클럽)에 의한 경우가 많습니다.'
+        : '';
     risks.push({
-      id: 'nihl',
-      icon: '🏭',
-      title: '소음성 난청(NIHL) 패턴 감지',
-      subtitle: '4 kHz 노치 패턴',
+      id: 'nihl', icon: '🏭',
+      title: '소음성 난청(NIHL) 패턴',
+      subtitle: '4 kHz 노치 — 소음 노출 확인 필요',
       level: 'warning',
-      description: '4 kHz에서 급격한 역치 상승이 감지되었습니다. 직업적 또는 일상 소음 노출 여부를 확인하세요.',
-      detail: '4 kHz "노치(notch)" 패턴은 광대역 산업 소음 노출에 의한 소음성 난청의 가장 특징적인 소견입니다. 소음 환경 작업 시 청력 보호구(귀마개·귀덮개) 착용이 필수이며, 더 이상의 청력 손실을 방지하는 것이 중요합니다. 군사 충격음의 경우 4–6 kHz에서 주로 발생합니다.',
-      source: 'Moore et al., Trends in Hearing 2022 · PMC Cluster Analysis 2021',
+      description: '4 kHz 급격한 역치 상승은 산업 소음·충격음 노출의 가장 특징적 소견입니다.',
+      detail: `4 kHz "노치(notch)" 패턴이 감지되었습니다. 이는 광대역 산업 소음(기계·공구), 군사 충격음(총성·폭발음), 고음량 음악 노출에 의한 소음성 난청의 병리학적 특징입니다. 내유모세포 및 나선신경절의 비가역적 손상이 기전입니다. 더 이상의 소음 노출 차단과 청력 보호구 착용이 필수적입니다.${ageNote}`,
+      source: 'Moore et al., Trends in Hearing 2022 · NHANES Noise Study',
     });
   }
 
-  // ③ 치매 / 인지기능
+  // ══════════════════════════════════════════════════════════════════
+  // ③ 인지기능 저하 / 치매 — 연령별 위험도 정밀화
+  // ══════════════════════════════════════════════════════════════════
   if (avgPTA > 25) {
-    let level: HealthRisk['level'] = 'caution';
-    let detail = '';
-    let subtitle = '';
-    if (avgPTA <= 40) {
-      level    = 'caution';
-      subtitle = `치매 위험 HR ≈ 1.89`;
-      detail   = `순음평균 ${avgPTA} dB HL (경도 난청)은 정상 청력 대비 치매 위험 HR 1.89에 해당합니다. 10 dB 청력손실마다 치매 위험이 27% 증가합니다. 인지기능 선별검사(MoCA)를 권장합니다.`;
-    } else if (avgPTA <= 55) {
-      level    = 'warning';
-      subtitle = `치매 위험 HR ≈ 3.00`;
-      detail   = `순음평균 ${avgPTA} dB HL (중도 난청)은 치매 위험 HR 3.00에 해당합니다. 인지기능 선별검사(MMSE, MoCA)와 이비인후과 전문 청력검사를 받아보시기를 강력 권장합니다.`;
+    let demLevel: HealthRisk['level'] = 'caution';
+    let baseHR = 1.89;
+    if      (avgPTA <= 40) { baseHR = 1.89; demLevel = 'caution'; }
+    else if (avgPTA <= 70) { baseHR = 3.00; demLevel = 'warning'; }
+    else                   { baseHR = 4.94; demLevel = 'alert';   }
+    const ageBonus = isSeniorPlus
+      ? ` 60세 이상 고령자는 치매 발생 위험이 71% 추가 상승(HR 1.71, Framingham Heart Study). APOE ε4 보유자는 위험비 최대 2.86배.`
+      : isMiddleAge
+        ? ` 중장년(40~59세)에서 PTA 역치 10 dB 증가마다 치매 위험 1.27배 가중(95% CI 1.06~1.50).`
+        : '';
+    const wmhNote = isSeniorPlus ? ' 대뇌 백질 고신호 강도(WMHV) 증가와 선형 상관(β=0.02). 실행 기능 저하 β=−0.04.' : '';
+    risks.push({
+      id: 'dementia', icon: '🧠',
+      title: '인지기능 저하 / 치매',
+      subtitle: `치매 위험 HR ≈ ${baseHR}${isSeniorPlus ? ' (+연령 가중)' : ''}`,
+      level: demLevel,
+      description: '청력손실은 치매의 수정 가능한 최대 단일 위험인자. 10 dB 악화마다 위험 27% 증가.',
+      detail: `순음평균 ${avgPTA} dB HL — 정상 청력 대비 치매 위험비 ${baseHR}. 저·중주파수(0.5~2 kHz) 손실은 기억력 저하, 실행 능력 저하와 가장 강한 상관관계(CLSA N=13,654).${ageBonus}${wmhNote} ACHIEVE 임상시험(Lancet 2023)에서 보청기 착용이 치매 위험 48% 감소. MoCA·MMSE 인지기능 선별검사를 권장합니다.`,
+      source: 'Framingham Heart Study(N=2,178, 15yr) · Lin et al., JAMA 2011 · ACHIEVE Lancet 2023 · CLSA N=13,654',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ④ 우울증·불안장애 — PTA 상관계수 r=0.792/0.781
+  // ══════════════════════════════════════════════════════════════════
+  if (avgPTA > 25) {
+    const depLevel: HealthRisk['level'] =
+      avgPTA > 55 ? 'warning' : avgPTA > 40 ? 'caution' : 'info';
+    const ageNote = isChild
+      ? ' 소아·청소년의 경우 사회적 고립, 학업 어려움으로 우울감이 더 빠르게 악화될 수 있습니다.'
+      : isYoungAdult
+        ? ' 젊은 성인은 주관적 청력 장애 인식(HHIA β≈0.37)이 우울 분산의 30%를 설명합니다.'
+        : isSeniorPlus
+          ? ' 노인의 청각 고립은 우울·인지 저하를 가속화합니다. 정기 정신건강 선별이 필요합니다.'
+          : '';
+    risks.push({
+      id: 'depression', icon: '💙',
+      title: '우울증 · 불안장애',
+      subtitle: avgPTA > 55 ? 'PTA-SDS 상관 r=0.792 — 고위험' : avgPTA > 40 ? 'SAS r=0.781 불안 52.3% 공존' : '경도 난청도 우울 OR 1.35 상승',
+      level: depLevel,
+      description: '난청 환자 52.3% 불안·48.8% 우울 공존. PTA-우울 상관 r=0.792(p<0.001).',
+      detail: `순음평균 ${avgPTA} dB HL — PTA 역치와 불안(SAS r=0.781)·우울(SDS r=0.792)·이명장애지수(THI r=0.808) 간 매우 강력한 정적 상관 입증(N=600). 달팽이관 손상으로 인한 청각 피질의 과잉 활성화가 변연계·편도체를 자극하는 것이 기전입니다. 주관적 청력 장애감이 클수록 우울 위험이 더 크게 증가합니다.${ageNote} PHQ-9·BAI 선별검사를 권장합니다.`,
+      source: '이명·난청-기분장애 상관연구(N=600) · Frontiers Neurology 2024(N=254,466)',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑤ 중증 정신질환(SMI) — 항정신병 약물 + PTA 역치 악화
+  // ══════════════════════════════════════════════════════════════════
+  if (avgPTA > 25 && (isMiddleAge || isSeniorPlus || isYoungAdult)) {
+    risks.push({
+      id: 'smi', icon: '🧩',
+      title: '중증 정신질환(SMI) 관련성',
+      subtitle: '항정신병 약물 사용자 PTA +3.75~4.49 dB 악화',
+      level: 'info',
+      description: '조현병·양극성장애 환자는 항정신병 약물 복용 시 청력 역치가 추가 악화됩니다.',
+      detail: `HCHS/SOL 코호트 다변량 분석 결과, 항정신병 약물 복용 환자는 대조군 대비 더 좋은 귀(better ear)의 PTA 역치가 3.75 dB(95% CI 2.36~5.13) 더 나빴으며, 정신과 처방 항정신병 약물 사용자는 4.49 dB 더 악화(95% CI 2.56~6.43, p<.001). SMI 자체의 병태생리 또는 항정신병 약물의 잠재적 이독성이 기전으로 추정됩니다. 정신과 진료 중이라면 정기적 PTA 모니터링이 권장됩니다.`,
+      source: 'HCHS/SOL 코호트 다변량 분석 · J Psychiatric Res 2023',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑥ ADHD — 연령 특이적
+  // ══════════════════════════════════════════════════════════════════
+  if (isChild || (isYoungAdult && (avgPTA > 15 || hasHighFreqSlope))) {
+    risks.push({
+      id: 'adhd', icon: '⚡',
+      title: isChild ? 'ADHD / 학습장애 배제 필요' : 'ADHD · 청각처리장애(APD)',
+      subtitle: isChild ? '소아 PTA 정상이어도 청각처리 결함 가능' : '음조 감별·주의력 연관성',
+      level: isChild ? 'caution' : 'info',
+      description: isChild
+        ? '청력 손실은 ADHD로 오진되기 쉽습니다. 청각처리장애(APD) 검사가 선행되어야 합니다.'
+        : 'ADHD 환자 중 1/3이 청각 갭 탐지 점수와 TOVA 주의력 지수 상관관계를 보입니다.',
+      detail: isChild
+        ? `소아 청력 손실은 교실에서 부주의를 유발해 ADHD로 오진될 수 있습니다(진단적 덮어씌우기). 순음청력 정상이어도 ADHD 아동에서 청각 불일치 부정 전위(MMN) 이상, 주의력 전환 기능 결함 관찰. ADHD 평가 전 ABR·APD 검사 병행 필수. 메틸페니데이트 복용 시 드물게 돌발성 난청 부작용 보고 — 청력 모니터링 필요.`
+        : `청각 갭 탐지(Gap Detection) 점수와 TOVA 주의력 검사 간 유의미한 상관관계 확인. 음조 변화 감지 능력이 전두엽 지속적 주의력 네트워크와 긴밀히 결합. 청각처리장애(APD) 정밀 평가를 권장합니다.`,
+      source: 'ERP-ADHD 청각처리연구 · TOVA-청각갭탐지 상관연구',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑦ 심혈관질환 — 고주파 OR 4.39, 저중주파 HDL OR 2.20
+  // ══════════════════════════════════════════════════════════════════
+  const chdHighFreq = highFreqAvg > 40;
+  const hdlLowMid   = lowMidAvg > 25;
+  if (chdHighFreq || hdlLowMid || hasLowFreqLoss || avgPTA > 25) {
+    let cvLevel: HealthRisk['level'] = 'info';
+    let cvSubtitle = '';
+    let cvDetail   = '';
+    const ageNote  = (isMiddleAge || isSeniorPlus)
+      ? ` ${hasAge ? age+'세' : '중장년'} 연령대에서 내피세포 기능 부전이 누적되어 내이 허혈 위험이 더 높습니다.`
+      : '';
+    if (chdHighFreq) {
+      cvLevel    = 'warning';
+      cvSubtitle = `고주파(${Math.round(highFreqAvg)} dB) — 관상동맥질환 OR 4.39`;
+      cvDetail   = `고주파(3000~8000 Hz) 평균 역치 ${Math.round(highFreqAvg)} dB HL — 관상동맥심장질환(CHD) 병력 시 고주파 청력 손상 OR 4.39(NHANES N=536). 달팽이관 기저 회전부는 와우동맥 말단에 위치해 허혈에 가장 먼저 취약. 심전도·관상동맥 검사, HDL·LDL 지질 프로파일 확인을 권장합니다.${ageNote} 당뇨성 말초신경병증 동반 시 OR 4.42로 추가 상승.`;
+    } else if (hdlLowMid) {
+      cvLevel    = 'caution';
+      cvSubtitle = `저중주파(${Math.round(lowMidAvg)} dB) — 저 HDL 콜레스테롤 OR 2.20`;
+      cvDetail   = `저·중주파수(500~2000 Hz) 평균 역치 ${Math.round(lowMidAvg)} dB HL — HDL 콜레스테롤 40 mg/dL 미만에서 저·중주파 손상 OR 2.20(NHANES 분석). 달팽이관 첨부 모세포 대사 환경 악화 및 허혈성 괴사가 기전. 지질 패널(TC, LDL, HDL, TG) 검사와 순환기내과 상담을 권장합니다.${ageNote}`;
     } else {
-      level    = 'alert';
-      subtitle = `치매 위험 HR ≈ 4.94`;
-      detail   = `순음평균 ${avgPTA} dB HL (고도 이상 난청)은 치매 위험 HR 4.94로 매우 높습니다. ACHIEVE 임상시험(Lancet 2023)에서 보청기 착용과 청각 재활이 치매 위험을 48% 줄인 것으로 입증되었습니다. 즉시 청각 재활을 시작하시기 바랍니다.`;
+      cvSubtitle = `뇌졸중 HR 1.33 · 관상동맥질환 OR 1.36`;
+      cvDetail   = `순음평균 ${avgPTA} dB HL — 청력손실은 뇌졸중 HR 1.33, 관상동맥질환 OR 1.36과 독립적으로 연관됩니다. 내이 미세혈관이 전신 혈관 내피 기능 부전의 조기 지표로 작용합니다. 혈압·콜레스테롤·공복혈당 정기 검진을 권장합니다.${ageNote}`;
     }
     risks.push({
-      id: 'dementia',
-      icon: '🧠',
-      title: '인지기능 저하 / 치매',
-      subtitle,
-      level,
-      description: '청력손실은 치매의 수정 가능한 최대 단일 위험인자입니다. 10 dB 악화마다 치매 위험 27% 증가.',
-      detail,
-      source: 'Lin et al., JAMA Neurology 2011 · ACHIEVE Trial, The Lancet 2023 · Ageing Research Reviews 2024(N=1,548,754)',
+      id: 'cardiovascular', icon: '🫀',
+      title: '심혈관질환 · HDL 이상지질혈증',
+      subtitle: cvSubtitle, level: cvLevel,
+      description: '내이 미세혈관은 전신 심혈관 기능 부전의 조기 탐지 센서입니다.',
+      detail: cvDetail,
+      source: 'NHANES 당뇨코호트(N=536) · OHN Meta-analysis 2024 · Framingham Cohort HDL Study',
     });
   }
 
-  // ④ 심혈관질환
-  if (avgPTA > 25 || hasLowFreqLoss) {
-    const isHighRisk = hasLowFreqLoss;
-    risks.push({
-      id: 'cardiovascular',
-      icon: '🫀',
-      title: '심혈관질환 연관성',
-      subtitle: isHighRisk ? '저주파 손실 — 주의' : '참고 수준',
-      level: isHighRisk ? 'warning' : 'caution',
-      description: isHighRisk
-        ? '저주파 청력손실 패턴은 심혈관질환·뇌졸중과 독립적으로 연관됩니다.'
-        : '청력손실은 뇌졸중 위험 OR 1.26, 관상동맥질환 OR 1.36과 연관됩니다.',
-      detail: isHighRisk
-        ? '저주파(250–1000 Hz) 청력손실 패턴이 감지되었습니다. 이 패턴은 뇌혈관질환, 말초혈관질환, 관상동맥질환과 독립적 연관성을 보입니다. 혈압·콜레스테롤 정기 검진 및 순환기내과 상담을 권장합니다.'
-        : `순음평균 ${avgPTA} dB HL의 청력손실은 뇌졸중 HR 1.33, 관상동맥질환 OR 1.36과 연관됩니다. 심혈관 위험인자(혈압, 혈당, 콜레스테롤) 정기 검진을 권장합니다.`,
-      source: 'OHN Meta-analysis 2024 · Scientific Reports 2021 · PubMed 2009(Audiometric Pattern as CVD Predictor)',
-    });
-  }
-
-  // ⑤ 당뇨병
+  // ══════════════════════════════════════════════════════════════════
+  // ⑧ 제2형 당뇨병 · 미세혈관병증
+  // ══════════════════════════════════════════════════════════════════
   if (hasHighFreqSlope || avgPTA > 25) {
+    const dmAgeNote = isMiddleAge
+      ? ` 40~59세 중장년층은 제2형 당뇨 유병률이 높고, 조기 미세혈관 합병증으로 내이 손상이 진행될 수 있습니다.`
+      : isSeniorPlus ? ` 고령자의 고주파 손실은 오랜 혈당 불량 관리에 따른 누적 와우 손상일 가능성이 있습니다.` : '';
     risks.push({
-      id: 'diabetes',
-      icon: '🩸',
-      title: '당뇨병 연관성',
-      subtitle: hasHighFreqSlope ? '고주파 손실 패턴 일치' : '참고 수준',
+      id: 'diabetes', icon: '🩸',
+      title: '제2형 당뇨병 · 미세혈관병증',
+      subtitle: hasHighFreqSlope ? '고주파 하향 경사형 — 당뇨성 와우 손상 패턴' : '참고 수준 — HbA1c 확인 권장',
       level: hasHighFreqSlope ? 'caution' : 'info',
-      description: '당뇨 환자의 청력손실 발생률은 정상인의 약 5배입니다(9.2 vs 1.8건/1000인년).',
+      description: '당뇨 환자 청력손실 발생률 정상인의 약 2배. 비타민 D 결핍이 당뇨성 청력손실 핵심 매개변수.',
       detail: hasHighFreqSlope
-        ? '고주파(2–8 kHz) 하향 경사형 청력도 패턴이 감지되었습니다. 이 패턴은 당뇨성 와우 미세혈관 손상(모세혈관벽 비후, 나선신경절 퇴행)의 특징적 소견입니다. 공복혈당·HbA1c 검사를 권장합니다.'
-        : '청력손실과 당뇨병은 독립적 연관성을 보입니다. 혈당 이상 여부를 확인하시기 바랍니다.',
-      source: 'Molecular Medicine 2023 · Int J Epidemiology 2017(N=253,301)',
+        ? `고주파(2~8 kHz) 하향 경사형 — 당뇨성 와우 미세혈관 손상(모세혈관벽 비후, AGEs 축적, 나선신경절 퇴행) 특징적 패턴. NHANES 분석에서 CHD 병력 시 OR 4.39, 말초신경병증 시 OR 4.42. 25(OH)D(비타민 D)가 고주파 역치 보호 독립 예측변수(β=−0.605, p=0.041). 공복혈당·HbA1c·25(OH)D 동시 검사를 권장합니다.${dmAgeNote}`
+        : `청력손실과 제2형 당뇨병 간 독립적 연관성. 비타민 D 수치 확인 및 공복혈당 검사를 권장합니다.${dmAgeNote}`,
+      source: 'NHANES T2DM 코호트(N=536) · Molecular Medicine 2023',
     });
   }
 
-  // ⑥ 만성 신장질환(CKD)
-  if (avgPTA > 25) {
+  // ══════════════════════════════════════════════════════════════════
+  // ⑨ 만성 신장질환(CKD) — 병기별 유병률 매핑
+  // ══════════════════════════════════════════════════════════════════
+  if (avgPTA > 25 || highFreqAvg > 25) {
+    let ckdStageGuess = '';
+    let ckdLevel: HealthRisk['level'] = 'info';
+    if      (highFreqAvg > 55) { ckdStageGuess = 'CKD Stage 4~5 수준 패턴 — 유병률 50~80%'; ckdLevel = 'warning'; }
+    else if (highFreqAvg > 35) { ckdStageGuess = 'CKD Stage 3 수준 패턴 — 유병률 13.6%';    ckdLevel = 'caution'; }
+    else                       { ckdStageGuess = '초기 신장기능 저하 가능성 — eGFR 확인 권장'; }
+    const ckdAgeNote = isSeniorPlus ? ` 노인에서 eGFR은 연령만으로도 자연 감소하나, 청력 악화 동반 시 요독성 신경독성을 의심해야 합니다.` : '';
     risks.push({
-      id: 'ckd',
-      icon: '🫘',
-      title: '만성 신장질환(CKD) 연관성',
-      subtitle: '참고 수준',
+      id: 'ckd', icon: '🫘',
+      title: '만성 신장질환(CKD)',
+      subtitle: ckdStageGuess, level: ckdLevel,
+      description: 'CKD Stage 4~5에서 청력손실 유병률 50~80%. 신장·달팽이관 Na-K-ATPase 이온 수송 공유.',
+      detail: `신장 사구체 기저막과 달팽이관 혈관조(Stria vascularis)는 동일한 Na-K-ATPase 이온 수송 기전을 공유합니다. 병기별 난청 유병률: Stage 2=0%, Stage 3=13.6%, Stage 4=50%, Stage 5=80%(N=70 전향적 연구). 확장 고주파수(8~18 kHz) 역치는 아임상 신장 기능 저하 예측 AUC 0.70 초과. 투석 기간이 길수록 이명·현기증 빈도 정비례 증가. 혈청 크레아티닌·eGFR·BUN 검사를 권장합니다.${ckdAgeNote}`,
+      source: '한국 역학 데이터 · CKD 전향적 관찰연구(N=70) · Nature Reviews Nephrology 2024',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑩ SLE(루푸스) · 자가면역 내이질환
+  // ══════════════════════════════════════════════════════════════════
+  const autoimmuneSuspect =
+    (isFemale && (isYoungAdult || isMiddleAge)) ||
+    (asymmetry >= 10 && avgPTA > 25) ||
+    (avgPTA > 25 && hasHighFreqSlope && !hasNotch4k);
+  if (autoimmuneSuspect) {
+    const sleNote = isFemale && (isYoungAdult || isMiddleAge)
+      ? ` 20~50세 여성에서 SLE 발병률 가장 높음(남성 대비 9:1). 감각신경성 난청이 장기 손상 조기 지표.`
+      : '';
+    risks.push({
+      id: 'sle', icon: '🔴',
+      title: 'SLE(루푸스) · 자가면역 내이질환',
+      subtitle: 'SLE 난청 위험 OR 8배 · 표준 PTA 정상도 70% 고주파 손실',
+      level: (isFemale && isYoungAdult) ? 'caution' : 'info',
+      description: 'SLE 환자 난청 27.47% vs 대조군 3.3%. 9~16 kHz 초고주파에서 병리가 먼저 나타납니다.',
+      detail: `SLE 환자(N=91) vs 대조군: 난청 발생률 27.47% vs 3.3%(OR 8배 이상). SDI 점수 ≥2: OR 9.13, 이차성 쇼그렌 증후군 동반: OR 8.20. 표준 PTA 정상인 SLE 환자의 약 70%가 확장 고주파수(9000~16000 Hz) 검사에서 감각신경성 손실 확인 — 면역복합체의 혈관조 침착과 미세 혈관염이 기전.${sleNote} 갑상선 자가면역질환(하시모토·그레이브스), 류마티스 관절염, 강직성 척추염도 4 kHz 이상 고주파 손실과 연관됩니다. ANA, anti-dsDNA 검사와 류마티스내과 상담을 권장합니다.`,
+      source: 'SLE 통제연구(N=91) · EHFA 확장고주파수 분석 · 갑상선-청력연구',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑪ 비타민 D 결핍 — 연령·성별 특이성
+  // ══════════════════════════════════════════════════════════════════
+  {
+    let vitDLevel: HealthRisk['level'] = 'info';
+    let vitDSubtitle = '';
+    let vitDDetail   = '';
+    if (isChild || isYoungAdult) {
+      vitDSubtitle = '30세 미만 돌발성 난청(SSNHL) — 비타민 D 결핍 고위험';
+      vitDDetail   = `30세 미만에서 비타민 D 결핍(< 20 ng/mL)은 돌발성 감각신경성 난청(SSNHL) 발병·재발 위험을 급격히 높입니다. 이명 환자의 66%가 심각한 비타민 D 결핍 상태임이 보고되었습니다. 혈청 25(OH)D 검사를 권장합니다.`;
+    } else if (isMale && isSeniorPlus) {
+      vitDLevel    = 'caution';
+      vitDSubtitle = `고령 남성 노인성 난청(ARHL) — 비타민 D 결핍 OR 1.638`;
+      vitDDetail   = `KNHANES 다변량 분석: 비타민 D 결핍 노인 남성의 노인성 난청 OR 1.638(95% CI 1.058~2.538, p=0.027). 대한민국 남성의 65.7%가 비타민 D 결핍(< 50 nmol/L). UK Biobank 분석에서도 비타민 D 결핍은 70세 이상에서 저주파(LFHL) 및 대화음 주파수(SFHL) 난청 확률 대폭 증가. 혈청 25(OH)D 검사와 전문의 상담을 강력 권장합니다.`;
+    } else if (isPostMenopausal) {
+      vitDSubtitle = '폐경 후 여성 — 비타민 D 결핍·골다공증 연관 청력 손실';
+      vitDDetail   = `여성의 76.7%가 비타민 D 결핍(KNHANES). 폐경 후 비타민 D 부족은 골다공증과 함께 이낭(otic capsule) 탈석회화 및 와우 이온 항상성 파괴를 동반합니다. 제2형 당뇨 환자에서 25(OH)D가 고주파 역치 보호 독립 예측변수(β=−0.605, p=0.041). 혈청 25(OH)D와 골밀도(DXA) 동시 검사를 권장합니다.`;
+    } else {
+      vitDSubtitle = '비타민 D 결핍 — 이명·난청 위험 상승';
+      vitDDetail   = `비타민 D 결핍(< 20 ng/mL)은 이명(환자 66% 결핍), 노인성 난청, 돌발성 난청과 강력하게 연관됩니다. 달팽이관 내 비타민 D 수용체(VDR) 확인. 혈청 25(OH)D 검사를 권장합니다.`;
+    }
+    risks.push({
+      id: 'vitD', icon: '☀️',
+      title: '비타민 D 결핍',
+      subtitle: vitDSubtitle, level: vitDLevel,
+      description: '국내 성인 65~77% 비타민 D 결핍. 이명·돌발성 난청·노인성 난청과 강력 연관.',
+      detail: vitDDetail,
+      source: 'KNHANES 비타민D-청력 다변량 분석(OR 1.638) · UK Biobank · SSNHL-비타민D 연구',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑫ 철 결핍성 빈혈(IDA) — 연령·성별 특이성
+  // ══════════════════════════════════════════════════════════════════
+  if (isChild || isReproductiveF || avgPTA > 25) {
+    const idaLevel: HealthRisk['level'] = (isReproductiveF || isChild) ? 'caution' : 'info';
+    const idaNote = isChild
+      ? `소아(4~21세) 혈청 페리틴·헤모글로빈 기준치 미달 시 감각신경성 난청 OR 3.67배(95% CI 1.60~7.30). 와우 나선신경절 세포 수 감소, 부동섬모 붕괴가 기전.`
+      : isReproductiveF
+        ? `가임기 여성 IDA 진단 후 첫 1년 내 청력 손실 HR 2.79(95% CI 2.00~3.88, TriNetX N=73,282). Hb < 10 g/dL 중증 빈혈에서 난청 유병률 62.9~64.3%. 철분 보충 치료가 청력 역치를 부분적으로 회복시킬 수 있습니다.`
+        : `철 결핍성 빈혈은 혈관조 위축, 코르티 기관 나선신경절 세포 감소를 유발합니다. 중등도 빈혈 환자의 46.8%, 중증의 62.9%에서 감각신경성 난청 동반.`;
+    risks.push({
+      id: 'ida', icon: '🩺',
+      title: '철 결핍성 빈혈(IDA)',
+      subtitle: isChild ? '소아 IDA — 난청 OR 3.67배' : isReproductiveF ? '가임기 여성 1년 내 난청 HR 2.79' : '빈혈-난청 연관성',
+      level: idaLevel,
+      description: '산소 운반 능력 저하 → 고대사 활동 내이 직격. 중증 빈혈 환자 62.9% 감각신경성 난청 동반.',
+      detail: idaNote + ` CBC·혈청 페리틴·헤모글로빈 검사를 시행하고, 원인 불명 청력 저하 시 철분 결핍을 반드시 배제하시기 바랍니다.`,
+      source: 'TriNetX 코호트(N=73,282) · 빈혈-SNHL 임상연구(Fischer 검증) · 소아 IDA OR 3.67',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑬ 골다공증 · 낙상·골절 위험
+  // ══════════════════════════════════════════════════════════════════
+  if (isPostMenopausal || isElderly) {
+    const osteoLevel: HealthRisk['level'] =
+      (isElderly && ultraHighAvg > 40) ? 'warning' :
+      (isPostMenopausal && ultraHighAvg > 35) ? 'caution' : 'info';
+    const fracNote = isElderly
+      ? ` 25년 추적 종단 연구에서 고주파 PTA 역치 저하(p=0.007)·중주파 역치 저하(p=0.003)는 BMD(골밀도)보다 향후 골절을 더 예리하게 예측했습니다(체간 균형 상실 p=0.039 동반).`
+      : '';
+    risks.push({
+      id: 'osteoporosis', icon: '🦴',
+      title: '골다공증 · 낙상·골절 위험',
+      subtitle: `고주파(8kHz) 손실 — 골다공증 OR 2.648(여성 50세 이상)`,
+      level: osteoLevel,
+      description: '골다공증 여성의 8 kHz 청력 손실 OR 2.648. PTA는 DXA(골밀도)보다 골절 예측력 높음.',
+      detail: `폐경 후 여성 다중 로지스틱 회귀 분석: 골다공증 환자의 4 kHz 손실 OR 2.078(95% CI 1.092~3.954), 8 kHz 손실 OR 2.648(95% CI 1.543~4.544). 전정기관 감각 모세포 퇴행이 공간 지각 능력 상실·고유수용성 감각 결함으로 이어져 낙상 위험을 가중시킵니다.${fracNote} 비타민 D 혈중 농도, 칼슘 수치, DXA 골밀도 검사를 권장합니다.`,
+      source: '골다공증-PTA 다중 로지스틱 회귀(OR 2.648) · 25년 종단연구(골절 예측) · 메타분석 OR 1.2~4.50',
+    });
+  } else if (isElderly && !isFemale && ultraHighAvg > 40) {
+    risks.push({
+      id: 'fall_risk', icon: '🦴',
+      title: '고령 낙상·골절 위험',
+      subtitle: '고주파 손실 — 전정 기능 저하·균형 감각 이상',
       level: 'info',
-      description: 'CKD 환자 청력손실 유병률은 일반 인구 대비 85% 높습니다.',
-      detail: '신장과 달팽이관은 공통 형태발생학적 기원을 가지며 동일한 이온 수송 기전(Na-K-ATPase)을 공유합니다. CKD 단계가 높을수록 청력손실이 심화됩니다(eGFR↓ ↔ 고주파 역치↑, r=−0.47). 신장 기능 검사(eGFR, 혈청 크레아티닌)를 권장합니다.',
-      source: 'Nature Reviews Nephrology 2024 · Renal Failure 2025 · Frontiers in Medicine 2024(NHANES, N=5,131)',
+      description: '청각·전정기관 인접. 청력 손실은 균형 감각 저하로 이어질 수 있습니다.',
+      detail: `고주파(4~8 kHz) 손실은 달팽이관과 인접한 전정기관의 감각 모세포 퇴행을 시사하며, 공간 지각 능력 저하 및 낙상 위험 증가와 연관됩니다. 25년 추적연구에서 PTA 역치가 BMD보다 낙상·골절을 더 예리하게 예측. 균형 기능 검사와 낙상 예방 프로그램 참여를 권장합니다.`,
+      source: '25년 종단연구(골절 예측) · 전정기능-PTA 상관연구',
     });
   }
 
-  // ⑦ 우울증 / 정신건강
-  if (avgPTA > 40) {
-    risks.push({
-      id: 'depression',
-      icon: '💙',
-      title: '우울증 / 정신건강',
-      subtitle: avgPTA > 55 ? '주의 수준' : '참고 수준',
-      level: avgPTA > 55 ? 'caution' : 'info',
-      description: '청력손실은 우울증 발생 OR 1.35와 독립적으로 연관됩니다.',
-      detail: `중등도 이상 청력손실(${avgPTA} dB HL)은 사회적 고립, 의사소통 어려움을 통해 우울·불안 위험을 높입니다. 주관적 청력 장애감이 클수록 우울 위험이 더 크게 증가합니다. 청각 재활과 함께 정신건강의학과 상담도 고려하시기 바랍니다.`,
-      source: 'Frontiers in Neurology 2024(N=254,466) · MDPI Healthcare 2025',
-    });
-  }
-
-  // ⑧ 노인성 난청 아형 분석
+  // ══════════════════════════════════════════════════════════════════
+  // ⑭ 노인성 난청 아형 분석
+  // ══════════════════════════════════════════════════════════════════
   if (avgPTA > 20) {
-    if (isFlat) {
+    if (isFlat && isSeniorPlus) {
       risks.push({
-        id: 'presbycusis_strial',
-        icon: '📊',
-        title: '노인성 난청 — 대사형(혈관조형) 패턴',
-        subtitle: '평탄형 청력도',
+        id: 'presbycusis_strial', icon: '📊',
+        title: '노인성 난청 — 대사형(혈관조형)',
+        subtitle: '평탄형 청력도 — 혈관조 위축 패턴',
         level: 'info',
-        description: '평탄형 패턴은 달팽이관 혈관조 위축에 의한 노인성 난청의 특징입니다.',
-        detail: '평탄형(flat) 청력도는 달팽이관 혈관조(stria vascularis)의 위축으로 인한 노인성 난청(대사형) 패턴입니다. 이 아형은 어음변별력이 비교적 보존되어 보청기 효과가 우수합니다. 청각 재활 전문가 상담을 권장합니다.',
+        description: '달팽이관 혈관조 위축에 의한 대사형 패턴. 보청기 효과 우수.',
+        detail: '평탄형(flat) 청력도는 달팽이관 혈관조(stria vascularis) 위축에 의한 노인성 난청 대사형 패턴입니다. 어음변별력이 비교적 보존되어 보청기 효과가 가장 우수합니다. 심혈관 및 대사 위험인자(혈압, 혈당, 지질)를 함께 관리하시기 바랍니다.',
         source: 'Schuknecht & Gacek, AONR 1993 · Int J Audiology 2009',
       });
-    } else if (hasHighFreqSlope) {
+    } else if (hasHighFreqSlope && isSeniorPlus) {
       risks.push({
-        id: 'presbycusis_sensory',
-        icon: '📊',
-        title: '노인성 난청 — 감각형 패턴',
+        id: 'presbycusis_sensory', icon: '📊',
+        title: '노인성 난청 — 감각형(유모세포 손실)',
         subtitle: '고주파 하향 경사형',
         level: 'info',
-        description: '고주파 경사는 달팽이관 유모세포 손실에 의한 가장 흔한 노인성 난청 패턴입니다.',
-        detail: '고주파 경사형 청력도는 달팽이관 기저부 유모세포(hair cell) 소실에 의한 감각형 노인성 난청 패턴입니다. 고주파 자음(ㅅ, ㅈ, ㅊ 등) 인지에 어려움을 겪을 수 있습니다. 보청기 적합을 통해 의사소통 능력을 개선할 수 있습니다.',
+        description: '달팽이관 기저부 유모세포 소실. 고주파 자음(ㅅ, ㅈ, ㅊ) 인지 저하.',
+        detail: '고주파 경사형 청력도는 달팽이관 기저부 유모세포 소실에 의한 감각형 노인성 난청 패턴입니다. 고주파 자음(ㅅ, ㅈ, ㅊ, ㅍ) 인지에 어려움을 겪으며, 말소리는 들려도 무슨 말인지 모르는 증상으로 나타납니다. 보청기 적합 및 청각 재활 치료사 상담을 권장합니다.',
         source: 'Schuknecht & Gacek, AONR 1993 · Journal of Neuroscience 2020',
+      });
+    } else if (isFlat && !isSeniorPlus) {
+      risks.push({
+        id: 'presbycusis_young', icon: '⚠️',
+        title: '조기 대사성 청력 손실',
+        subtitle: '젊은 연령대 평탄형 — 혈관·대사 원인 배제 필요',
+        level: 'caution',
+        description: '젊은 연령의 평탄형 손실은 혈관·대사·자가면역 원인을 먼저 배제해야 합니다.',
+        detail: `${hasAge ? age+'세' : '현재 연령'}에서의 평탄형 청력 손실은 혈관조 이상, 대사증후군, 자가면역 내이질환, 이독성 약물 등의 원인을 먼저 배제해야 합니다. 내분비내과·이비인후과 정밀 검사를 권장합니다.`,
+        source: '임상 청각학 가이드라인 · 자가면역 내이질환 진단 기준',
       });
     }
   }
@@ -401,7 +624,7 @@ function buildPrintHtml(result: TestResult): string {
   const leftClass  = leftPTA  !== null ? classifyHL(leftPTA)  : null;
 
   const audiogramSvg = buildAudiogramSvg(result);
-  const risks = analyzeHealthRisks(result);
+  const risks = analyzeHealthRisks(result, result.user?.age, result.user?.gender);
   const healthRisksHtml = buildHealthRisksHtml(risks);
 
   const tableRows = FREQUENCY_ORDER.map(freq => {
@@ -555,7 +778,7 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
   const rightClass = rightPTA !== null ? classifyHL(rightPTA) : null;
   const leftClass  = leftPTA  !== null ? classifyHL(leftPTA)  : null;
 
-  const healthRisks = analyzeHealthRisks(result);
+  const healthRisks = analyzeHealthRisks(result, result.user?.age, result.user?.gender);
 
   const handleExportPdf = () => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
