@@ -30,7 +30,7 @@ const MODULE_INFO: Record<ScreeningModule, { icon: string; color: string; desc: 
   ehfa:        { icon: '\ud83d\udd0a', color: '#ff7043', desc: '확장 고주파 청력검사\n10kHz, 12.5kHz, 16kHz 순음 탐지' },
   cpt:         { icon: '\u26a1', color: '#ffd740', desc: '주의력 검사 (CPT)\n소리가 들리면 즉시 누르세요' },
   dlf:         { icon: '\ud83c\udfb5', color: C.accentPurple, desc: '주파수 변별력 검사\n두 소리가 같은지 다른지 판단하세요' },
-  gdt:         { icon: '\u23f1', color: '#26c6da', desc: '시간 해상도 검사\n소음 속 묵음 구간을 감지하세요' },
+  gdt:         { icon: '\u23f1', color: '#26c6da', desc: '시간 해상도 검사\n소음이 잠깐 끊기는 순간을 감지하세요\n끊김 없이 나오면 누르지 마세요' },
 };
 
 export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
@@ -223,9 +223,15 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
               <>
                 <Text style={s.instruction}>
                   {currentModule === 'cpt' ? '소리가 들리면 누르세요' :
-                   currentModule === 'gdt' ? '틈(묵음)이 느껴지면 누르세요' :
+                   currentModule === 'gdt' ? '소음 중간에 끊김이 느껴지면 누르세요' :
                    '소리가 들리면 누르세요'}
                 </Text>
+                {currentModule === 'gdt' && (
+                  <Text style={s.gdtHint}>
+                    "쉬이이..." 소음이 잠깐 끊기는 순간을 감지하세요{'\n'}
+                    끊김 없이 계속 나오면 누르지 마세요
+                  </Text>
+                )}
                 <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
                   <TouchableOpacity
                     style={[s.responseBtn, falsePosAlert && s.responseBtnError]}
@@ -238,7 +244,7 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
                       pressed && s.responseBtnPressed,
                     ]}>
                       <Text style={s.responseBtnText}>
-                        {currentModule === 'gdt' ? '감지!' : '들림!'}
+                        {currentModule === 'gdt' ? '끊겼다!' : '들림!'}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -308,7 +314,8 @@ const s = StyleSheet.create({
   fpAlertText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   responseArea: { alignItems: 'center' },
-  instruction: { color: C.textWhite, fontSize: 17, fontWeight: '600', marginBottom: 32, textAlign: 'center' },
+  instruction: { color: C.textWhite, fontSize: 17, fontWeight: '600', marginBottom: 12, textAlign: 'center' },
+  gdtHint: { color: C.accentCyan, fontSize: 12, lineHeight: 18, textAlign: 'center', marginBottom: 24 },
 
   responseBtn: { width: 150, height: 150, borderRadius: 75, justifyContent: 'center', alignItems: 'center' },
   responseBtnError: {},
