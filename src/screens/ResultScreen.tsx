@@ -31,6 +31,226 @@ function getPTA(thresholds: Partial<Record<TestFrequency, number>>): number | nu
   return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ── 논문 기반 청력도 임상 분류 분석 (맨 위에 표시) ─────────────────────
+// ══════════════════════════════════════════════════════════════════════
+
+export interface AudiogramAnalysis {
+  /** 난청 유형: 정상/전음성/감각신경성/혼합성/비대칭 */
+  hlType:         string;
+  hlTypeColor:    string;
+  /** WHO 중증도 분류 */
+  severity:       string;
+  severityColor:  string;
+  /** 청력도 패턴 형태 (하강형/노치형/평탄형 등) */
+  shape:          string;
+  /** 추정 원인/질환 */
+  etiology:       string;
+  /** 응급도 */
+  urgency:        'normal' | 'caution' | 'refer' | 'emergency';
+  urgencyLabel:   string;
+  urgencyColor:   string;
+  urgencyReason:  string;
+  /** 이퀄라이저 추천 (NAL-NL2 / DSL v5.0) */
+  eqMode:         'NAL-NL2' | 'DSL v5.0' | 'none';
+  eqReason:       string;
+  /** 임상 해석 요약 */
+  clinicalNote:   string;
+  /** 권고사항 */
+  recommendation: string;
+  /** Red Flag 목록 */
+  redFlags:       string[];
+}
+
+function analyzeAudiogramPattern(
+  result: TestResult,
+  ageStr?: string,
+  genderArg?: string,
+): AudiogramAnalysis {
+  const rightPTA = getPTA(result.right);
+  const leftPTA  = getPTA(result.left);
+  const avgPTA   = (rightPTA !== null && leftPTA !== null)
+    ? Math.round((rightPTA + leftPTA) / 2)
+    : (rightPTA ?? leftPTA ?? 0);
+  const asymmetry = (rightPTA !== null && leftPTA !== null)
+    ? Math.abs(rightPTA - leftPTA) : 0;
+
+  const age    = ageStr ? parseInt(ageStr, 10) : undefined;
+  const hasAge = age !== undefined && !isNaN(age) && age > 0;
+  const isChild    = hasAge && age! < 18;
+  const isSenior   = hasAge && age! >= 60;
+  const isElderly  = hasAge && age! >= 70;
+  const isFemale   = genderArg === 'female';
+
+  const rP = detectPattern(result.right);
+  const lP = detectPattern(result.left);
+  const hasNotch4k       = rP.hasNotch4k      || lP.hasNotch4k;
+  const hasHighFreqSlope = rP.hasHighFreqSlope || lP.hasHighFreqSlope;
+  const hasLowFreqLoss   = rP.hasLowFreqLoss  || lP.hasLowFreqLoss;
+  const isFlat           = rP.isFlat          || lP.isFlat;
+
+  // 쿠키바이트(U자형): 중간 주파수가 양 끝보다 15 dB 이상 높음
+  const r500  = result.right[500]  ?? result.left[500]  ?? 0;
+  const r2k   = result.right[2000] ?? result.left[2000] ?? 0;
+  const r125  = result.right[125]  ?? result.left[125]  ?? 0;
+  const r8k   = result.right[8000] ?? result.left[8000] ?? 0;
+  const isCookieBite = r2k > 15 && (r2k - r125 >= 15) && (r2k - r8k >= 15);
+
+  // Red Flag 목록
+  const redFlags: string[] = [];
+  if (asymmetry >= 15) redFlags.push(`⚠️ 양측 비대칭 ${asymmetry} dB — MRI 청신경 검사 즉시 필요`);
+  if (avgPTA > 70)     redFlags.push('⚠️ 고도·심도 난청 — 보청기 적합 전문가 상담 필요');
+  if (hasNotch4k && avgPTA <= 40) redFlags.push('⚠️ 4 kHz 소음성 노치 — 추가 소음 노출 차단 필수');
+  if (hasLowFreqLoss && !isSenior) redFlags.push('⚠️ 저주파 손실 — 메니에르병/내림프수종 가능성 평가 필요');
+  if (isFlat && avgPTA > 40) redFlags.push('⚠️ 광대역 평탄형 손실 — 전음성/혼합성 감별 이비인후과 진찰 필요');
+  if (isCookieBite)    redFlags.push('⚠️ U자형(쿠키바이트) 패턴 — 유전성/선천성 난청 유전자 검사 고려');
+
+  // ── 난청 유형 분류 ──────────────────────────────────────────────
+  let hlType = '정상 청력';
+  let hlTypeColor = '#2e7d32';
+
+  if (avgPTA > 25) {
+    // 단순 버전: PTA > 25이면 감각신경성으로 기본 분류
+    // (모바일 앱은 골도검사가 없으므로 패턴으로 추정)
+    if (isFlat && avgPTA >= 30 && avgPTA <= 60) {
+      hlType = '전음성/혼합성 난청 의심';
+      hlTypeColor = '#e65100';
+    } else if (asymmetry >= 15) {
+      hlType = '비대칭 감각신경성 난청';
+      hlTypeColor = '#b71c1c';
+    } else {
+      hlType = '감각신경성 난청';
+      hlTypeColor = '#c62828';
+    }
+  }
+
+  // ── WHO 중증도 ────────────────────────────────────────────────
+  let severity = '정상 (Normal, ≤25 dB HL)';
+  let severityColor = '#2e7d32';
+  if      (avgPTA <= 25) { severity = '정상 (Normal)';           severityColor = '#2e7d32'; }
+  else if (avgPTA <= 40) { severity = '경도 (Mild, 26–40 dB)';   severityColor = '#f57f17'; }
+  else if (avgPTA <= 55) { severity = '중도 (Moderate, 41–55 dB)'; severityColor = '#e65100'; }
+  else if (avgPTA <= 70) { severity = '중고도 (Mod-severe, 56–70 dB)'; severityColor = '#bf360c'; }
+  else if (avgPTA <= 90) { severity = '고도 (Severe, 71–90 dB)';  severityColor = '#b71c1c'; }
+  else                   { severity = '심도 (Profound, 91+ dB)';  severityColor = '#880e4f'; }
+
+  // ── 청력도 형태(Shape) ──────────────────────────────────────
+  let shape = '다양한 주파수 손실';
+  if (avgPTA <= 25)       shape = '정상 범위';
+  else if (hasNotch4k)    shape = '4 kHz V자 노치형 (소음성 패턴)';
+  else if (isCookieBite)  shape = 'U자형 / 쿠키바이트형 (중주파 손실)';
+  else if (hasHighFreqSlope && hasLowFreqLoss) shape = '안장형 (저·고주파 손실)';
+  else if (hasHighFreqSlope) shape = '고주파 하강형 (Downsloping)';
+  else if (hasLowFreqLoss)   shape = '저주파 상승형 (Upsloping)';
+  else if (isFlat)           shape = '광대역 평탄형 (Flat)';
+
+  // ── 추정 원인/질환 ────────────────────────────────────────────
+  let etiology = '원인 불명';
+  if (avgPTA <= 25) {
+    etiology = '정상 청력 — 이상 소견 없음';
+  } else if (hasNotch4k) {
+    etiology = '소음성 난청(NIHL) — 이어폰·직업 소음 노출 추정';
+  } else if (isCookieBite) {
+    etiology = '유전성/선천성 난청 (Connexin 26 등 유전자 변이 가능)';
+  } else if (hasLowFreqLoss && !isSenior) {
+    etiology = '메니에르병(Ménière) / 내림프수종 가능성';
+  } else if (hasHighFreqSlope && (isSenior || isElderly)) {
+    etiology = '노인성 난청(Presbycusis) — 달팽이관 기저부 퇴행';
+  } else if (hasHighFreqSlope) {
+    etiology = '감각신경성 고주파 하강 — 노화·소음·약물 등 복합 원인';
+  } else if (isFlat && avgPTA >= 30) {
+    etiology = '전음성 요소 가능성 (중이염·이경화증 등) 또는 급성 광범위 손상';
+  } else if (asymmetry >= 15) {
+    etiology = '편측성 병변 — 청신경종(전정신경초종) 배제 필수';
+  } else {
+    etiology = '감각신경성 난청 — 원인 감별 청각 정밀 검사 필요';
+  }
+
+  // ── 응급도 ────────────────────────────────────────────────────
+  let urgency:      AudiogramAnalysis['urgency'] = 'normal';
+  let urgencyLabel  = '✅ 이상 없음';
+  let urgencyColor  = '#2e7d32';
+  let urgencyReason = '현재 검사에서 즉각적인 응급 소견은 없습니다.';
+
+  if (asymmetry >= 15 && avgPTA > 40) {
+    urgency       = 'emergency';
+    urgencyLabel  = '🚨 즉시 병원';
+    urgencyColor  = '#b71c1c';
+    urgencyReason = `좌우 ${asymmetry} dB 비대칭 + 고도 손실 — 전정신경초종·뇌졸중 배제를 위한 MRI(청신경 조영증강) 즉시 필요. 72시간 내 치료가 예후를 결정합니다.`;
+  } else if (asymmetry >= 15) {
+    urgency       = 'refer';
+    urgencyLabel  = '🔴 전문의 의뢰';
+    urgencyColor  = '#c62828';
+    urgencyReason = `좌우 ${asymmetry} dB 비대칭 — 이비인후과 정밀 검사 및 MRI 청신경 영상 필요.`;
+  } else if (avgPTA > 55 && !isSenior) {
+    urgency       = 'refer';
+    urgencyLabel  = '🔴 전문의 의뢰';
+    urgencyColor  = '#c62828';
+    urgencyReason = '중고도 이상 난청이 고연령 외 원인으로 의심됩니다. 이비인후과 정밀 검진 및 ABR·임피던스 검사 필요.';
+  } else if (hasLowFreqLoss && !isSenior) {
+    urgency       = 'refer';
+    urgencyLabel  = '🟠 전문의 상담';
+    urgencyColor  = '#e65100';
+    urgencyReason = '저주파 손실 패턴은 메니에르병·내림프수종 가능성으로 이비인후과 진찰 및 MRI 필요.';
+  } else if (avgPTA > 25) {
+    urgency       = 'caution';
+    urgencyLabel  = '🟡 주의 관찰';
+    urgencyColor  = '#f57f17';
+    urgencyReason = '경미한 청력 손실이 확인됩니다. 정기 모니터링과 이비인후과 검진을 권장합니다.';
+  }
+
+  // ── EQ 추천 (논문 NAL-NL2 / DSL v5.0) ───────────────────────
+  let eqMode: AudiogramAnalysis['eqMode'] = 'none';
+  let eqReason = '';
+  if (avgPTA > 25 && avgPTA <= 55) {
+    eqMode   = 'NAL-NL2';
+    eqReason = '경도~중도 난청: NAL-NL2 처방 — 어음 명료도와 청취 편안함 균형. 일상 대화·음악 감상에 최적.';
+  } else if (avgPTA > 55) {
+    eqMode   = 'DSL v5.0';
+    eqReason = '중고도~고도 난청: DSL v5.0 처방 — 전 주파수 가청 범위 진입 목표. 고주파 +7 dB, 저주파 +14 dB 적극 증폭. 소음 속 어음 인식 최우선.';
+  }
+
+  // ── 임상 해석 노트 ──────────────────────────────────────────
+  let clinicalNote = '';
+  if (avgPTA <= 25) {
+    clinicalNote = '현재 청력은 WHO 기준 정상 범위입니다. 정기적인 청력 모니터링과 소음 노출 주의가 예방에 도움이 됩니다.';
+  } else if (hasNotch4k) {
+    clinicalNote = `4 kHz V자 노치는 소음성 난청의 병리학적 특징입니다. 달팽이관 기저부 유모세포의 비가역적 손상이 기전으로, 추가 소음 노출 시 손실이 가속됩니다. 청력 보호구 착용이 필수입니다.${isChild ? ' 소아·청소년은 이어폰 볼륨을 최대치의 60% 이하로 제한해야 합니다.' : ''}`;
+  } else if (hasHighFreqSlope && isSenior) {
+    clinicalNote = '고주파 하강형 패턴은 노인성 난청(Presbycusis)의 전형으로, 달팽이관 기저부 유모세포의 퇴행성 변화입니다. ㅅ·ㅊ·ㅍ 등 고주파 자음 분별이 어렵고 소음 속 대화가 힘든 특성이 있습니다.';
+  } else if (hasLowFreqLoss) {
+    clinicalNote = '저주파 손실 패턴은 메니에르병(내림프수종)의 초기 특징입니다. 이명, 귀 충만감, 발작성 어지럼증이 동반되면 즉시 전문의를 방문하십시오.';
+  } else if (isCookieBite) {
+    clinicalNote = 'U자형(쿠키바이트) 패턴은 중간 주파수(1–2 kHz) 손실로 음성 대화 이해에 가장 큰 영향을 줍니다. Connexin 26 등 유전성 난청과 관련성이 높으므로 유전자 검사를 권장합니다.';
+  } else if (isFlat && avgPTA >= 30) {
+    clinicalNote = '광대역 평탄형 손실은 전음성 요소(중이염·이소골 이상·이경화증)나 급성 광범위 감각신경성 손상 모두 가능합니다. 기도-골도 차이(Air-Bone Gap) 측정을 위한 임피던스 청력검사가 필요합니다.';
+  } else if (asymmetry >= 15) {
+    clinicalNote = '비대칭 난청은 청신경종(전정신경초종), 내이도 혈관 병변, 돌발성 난청 후유증 등 단측 병변의 주요 신호입니다. 즉시 이비인후과를 방문하여 MRI(내이도 조영증강) 검사를 받으십시오.';
+  } else {
+    clinicalNote = `양측 순음 역치 ${avgPTA} dB HL로 감각신경성 난청이 확인됩니다. 추가적인 청각 정밀 검사(ABR·DPOAE·어음 인지 검사)와 이비인후과 진찰을 권장합니다.`;
+  }
+
+  // ── 권고사항 ────────────────────────────────────────────────
+  let recommendation = '';
+  if (avgPTA <= 25 && asymmetry < 10) {
+    recommendation = '정기 청력 검사(연 1회 권장) · 소음 환경 85 dB 초과 시 보호구 착용 · 이어폰 사용 60/60 규칙 준수';
+  } else if (urgency === 'emergency') {
+    recommendation = '즉시 이비인후과 또는 응급실 방문 → MRI 청신경 조영증강 검사 → 돌발성 난청 스테로이드 치료 72시간 이내';
+  } else if (urgency === 'refer') {
+    recommendation = '2주 이내 이비인후과 방문 → ABR·임피던스·DPOAE 정밀 검사 → 필요 시 MRI 청신경 영상';
+  } else if (avgPTA > 40) {
+    recommendation = '보청기 적합(Fitting) 상담 · 청각 재활 프로그램 · NAL-NL2 또는 DSL v5.0 처방 기반 EQ 보조';
+  } else {
+    recommendation = '이비인후과 정기 검진 · 소음 노출 최소화 · 이어폰 60% 이하 볼륨 사용 · 청력 악화 시 즉시 방문';
+  }
+
+  return {
+    hlType, hlTypeColor, severity, severityColor,
+    shape, etiology, urgency, urgencyLabel, urgencyColor, urgencyReason,
+    eqMode, eqReason, clinicalNote, recommendation, redFlags,
+  };
+}
+
 // ── 청력도 패턴 분석 ─────────────────────────────────────────────────
 
 export interface HealthRisk {
@@ -807,7 +1027,8 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
   const rightClass = rightPTA !== null ? classifyHL(rightPTA) : null;
   const leftClass  = leftPTA  !== null ? classifyHL(leftPTA)  : null;
 
-  const healthRisks = analyzeHealthRisks(result, result.user?.age, result.user?.gender);
+  const healthRisks  = analyzeHealthRisks(result, result.user?.age, result.user?.gender);
+  const audioPattern = analyzeAudiogramPattern(result, result.user?.age, result.user?.gender);
 
   const handleExportPdf = () => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {
@@ -878,6 +1099,88 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
           })}
         </Text>
       )}
+
+      {/* ══════════════════════════════════════════════════════════════
+          청력도 임상 분석 카드 — 논문 기반, 최상단 표시
+          ══════════════════════════════════════════════════════════════ */}
+
+      {/* 긴급 배너 */}
+      {(audioPattern.urgency === 'emergency' || audioPattern.urgency === 'refer') && (
+        <View style={[styles.urgencyBanner, { borderColor: audioPattern.urgencyColor, backgroundColor: audioPattern.urgency === 'emergency' ? '#fff0f0' : '#fff7f0' }]}>
+          <Text style={[styles.urgencyBannerLabel, { color: audioPattern.urgencyColor }]}>
+            {audioPattern.urgencyLabel}
+          </Text>
+          <Text style={styles.urgencyBannerText}>{audioPattern.urgencyReason}</Text>
+        </View>
+      )}
+
+      {/* 임상 분석 메인 카드 */}
+      <View style={styles.patternCard}>
+        <Text style={styles.patternCardTitle}>🩺 청력도 임상 분석</Text>
+
+        {/* 유형 / 중증도 / 형태 그리드 */}
+        <View style={styles.patternGrid}>
+          <View style={styles.patternCell}>
+            <Text style={styles.patternCellLabel}>난청 유형</Text>
+            <Text style={[styles.patternCellValue, { color: audioPattern.hlTypeColor }]}>{audioPattern.hlType}</Text>
+          </View>
+          <View style={styles.patternCell}>
+            <Text style={styles.patternCellLabel}>WHO 중증도</Text>
+            <Text style={[styles.patternCellValue, { color: audioPattern.severityColor }]}>{audioPattern.severity}</Text>
+          </View>
+          <View style={[styles.patternCell, { flex: 2 }]}>
+            <Text style={styles.patternCellLabel}>청력도 패턴</Text>
+            <Text style={styles.patternCellValue}>{audioPattern.shape}</Text>
+          </View>
+        </View>
+
+        {/* 추정 원인 */}
+        <View style={styles.patternRow}>
+          <Text style={styles.patternRowLabel}>🔍 추정 원인</Text>
+          <Text style={styles.patternRowValue}>{audioPattern.etiology}</Text>
+        </View>
+
+        {/* 임상 해석 */}
+        <View style={[styles.patternNoteBox, { borderColor: audioPattern.urgencyColor + '55' }]}>
+          <Text style={styles.patternNoteTitle}>📋 임상 해석</Text>
+          <Text style={styles.patternNoteText}>{audioPattern.clinicalNote}</Text>
+        </View>
+
+        {/* EQ 추천 */}
+        {audioPattern.eqMode !== 'none' && (
+          <View style={styles.eqBox}>
+            <View style={styles.eqBadge}>
+              <Text style={styles.eqBadgeText}>🎧 {audioPattern.eqMode}</Text>
+            </View>
+            <Text style={styles.eqReason}>{audioPattern.eqReason}</Text>
+          </View>
+        )}
+
+        {/* Red Flags */}
+        {audioPattern.redFlags.length > 0 && (
+          <View style={styles.redFlagBox}>
+            <Text style={styles.redFlagTitle}>⚠️ Red Flag 주의 사항</Text>
+            {audioPattern.redFlags.map((flag, i) => (
+              <Text key={i} style={styles.redFlagItem}>{flag}</Text>
+            ))}
+          </View>
+        )}
+
+        {/* 권고사항 */}
+        <View style={styles.recommendBox}>
+          <Text style={styles.recommendTitle}>✅ 권고사항</Text>
+          <Text style={styles.recommendText}>{audioPattern.recommendation}</Text>
+        </View>
+
+        {/* 응급도 배지 (일반/주의) */}
+        {(audioPattern.urgency === 'normal' || audioPattern.urgency === 'caution') && (
+          <View style={[styles.urgencySmallBadge, { backgroundColor: audioPattern.urgencyColor + '22', borderColor: audioPattern.urgencyColor }]}>
+            <Text style={[styles.urgencySmallText, { color: audioPattern.urgencyColor }]}>
+              {audioPattern.urgencyLabel} — {audioPattern.urgencyReason}
+            </Text>
+          </View>
+        )}
+      </View>
 
       {/* Audiogram */}
       <View style={styles.chartCard}>
@@ -998,6 +1301,79 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f7fa' },
   content: { padding: 20, paddingBottom: 50 },
+
+  // ── 청력도 임상 분석 카드 ──────────────────────────────────────────
+  urgencyBanner: {
+    borderWidth: 2, borderRadius: 12, padding: 14, marginBottom: 12,
+  },
+  urgencyBannerLabel: { fontSize: 16, fontWeight: '900', marginBottom: 6 },
+  urgencyBannerText:  { fontSize: 13, color: '#333', lineHeight: 20 },
+
+  patternCard: {
+    backgroundColor: 'white', borderRadius: 16, padding: 18, marginBottom: 16,
+    shadowColor: '#1a237e', shadowOpacity: 0.10, shadowRadius: 10, elevation: 4,
+    borderWidth: 1.5, borderColor: '#c5cae9',
+  },
+  patternCardTitle: {
+    fontSize: 17, fontWeight: '900', color: '#1a237e', marginBottom: 14,
+    borderBottomWidth: 1, borderBottomColor: '#e8eaf6', paddingBottom: 8,
+  },
+  patternGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  patternCell: {
+    flex: 1, minWidth: 100,
+    backgroundColor: '#f5f7ff', borderRadius: 10, padding: 10,
+    borderWidth: 1, borderColor: '#e8eaf6',
+  },
+  patternCellLabel: {
+    fontSize: 9, fontWeight: '700', color: '#78909c',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
+  },
+  patternCellValue: { fontSize: 13, fontWeight: '700', color: '#212121', lineHeight: 18 },
+
+  patternRow: {
+    flexDirection: 'row', gap: 8, marginBottom: 10,
+    backgroundColor: '#f0f4ff', borderRadius: 8, padding: 10,
+  },
+  patternRowLabel: { fontSize: 12, fontWeight: '700', color: '#3949ab', minWidth: 72 },
+  patternRowValue: { fontSize: 12, color: '#333', flex: 1, lineHeight: 18 },
+
+  patternNoteBox: {
+    backgroundColor: '#fafbff', borderWidth: 1.5, borderRadius: 10,
+    padding: 12, marginBottom: 10,
+  },
+  patternNoteTitle: { fontSize: 12, fontWeight: '800', color: '#1a237e', marginBottom: 6 },
+  patternNoteText:  { fontSize: 12, color: '#37474f', lineHeight: 20 },
+
+  eqBox: {
+    backgroundColor: '#e8f5e9', borderRadius: 10, padding: 12, marginBottom: 10,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    borderWidth: 1, borderColor: '#a5d6a7',
+  },
+  eqBadge: {
+    backgroundColor: '#2e7d32', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+    flexShrink: 0,
+  },
+  eqBadgeText:  { color: 'white', fontSize: 11, fontWeight: '800' },
+  eqReason:     { fontSize: 11, color: '#1b5e20', flex: 1, lineHeight: 18 },
+
+  redFlagBox: {
+    backgroundColor: '#fff3e0', borderRadius: 10, padding: 12, marginBottom: 10,
+    borderWidth: 1.5, borderColor: '#ffb74d',
+  },
+  redFlagTitle: { fontSize: 12, fontWeight: '800', color: '#e65100', marginBottom: 6 },
+  redFlagItem:  { fontSize: 12, color: '#bf360c', lineHeight: 20, marginBottom: 2 },
+
+  recommendBox: {
+    backgroundColor: '#e3f2fd', borderRadius: 10, padding: 12, marginBottom: 10,
+    borderWidth: 1, borderColor: '#90caf9',
+  },
+  recommendTitle: { fontSize: 12, fontWeight: '800', color: '#0d47a1', marginBottom: 6 },
+  recommendText:  { fontSize: 12, color: '#1565c0', lineHeight: 20 },
+
+  urgencySmallBadge: {
+    borderWidth: 1, borderRadius: 8, padding: 10,
+  },
+  urgencySmallText: { fontSize: 12, fontWeight: '600', lineHeight: 18 },
   title: { fontSize: 26, fontWeight: 'bold', color: '#1a237e', textAlign: 'center', marginTop: 20, marginBottom: 4 },
   date: { fontSize: 13, color: '#78909c', textAlign: 'center', marginBottom: 20 },
   userCard: {
