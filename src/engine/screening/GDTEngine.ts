@@ -32,8 +32,12 @@ const STAIRCASE_CONFIG = {
   maxTrials: 30,
 };
 
+const PRACTICE_REQUIRED = 2;
+const PRACTICE_MAX_ROUNDS = 3;
+
 export type GDTEvent =
   | { type: 'practice_start' }
+  | { type: 'practice_info'; message: string; passed: boolean }
   | { type: 'noise_playing'; hasGap: boolean; gapMs: number }
   | { type: 'awaiting_response' }
   | { type: 'hit' }
@@ -65,18 +69,33 @@ export class GDTEngine {
   async start(): Promise<GDTMetrics> {
     this.isRunning = true;
 
-    // 연습 시행
+    // ── 연습: 2문제 연속 정답 시 통과, 최대 3라운드 ──
     this.emit({ type: 'practice_start' });
-    for (let p = 0; p < PRACTICE_TRIALS; p++) {
+    let practicePassed = false;
+    for (let round = 0; round < PRACTICE_MAX_ROUNDS && !practicePassed; round++) {
       if (!this.isRunning) break;
-      const detected = await this.runOneTrial(15, true);
-      if (!this.isRunning) break;
-      this.emit({ type: 'feedback', correct: detected });
-      await this.sleep(800);
-    }
-    if (!this.isRunning) return this.fallbackMetrics();
+      this.emit({ type: 'practice_info', message: `연습 ${round + 1}/${PRACTICE_MAX_ROUNDS}: 소음 중간 끊김이 느껴지면 누르세요`, passed: false });
+      await this.sleep(1500);
 
-    await this.sleep(1500);
+      let consecutive = 0;
+      while (consecutive < PRACTICE_REQUIRED && this.isRunning) {
+        // 연습은 항상 끊김 있는 시행 (15ms 큰 간격)
+        const detected = await this.runOneTrial(15, true);
+        if (!this.isRunning) break;
+        if (detected) {
+          consecutive++;
+          this.emit({ type: 'practice_info', message: `정답! 끊김을 감지했습니다 (${consecutive}/${PRACTICE_REQUIRED})`, passed: false });
+        } else {
+          consecutive = 0;
+          this.emit({ type: 'practice_info', message: '소음 중간에 잠깐 끊기는 순간에 눌러주세요!', passed: false });
+        }
+        await this.sleep(800);
+      }
+      if (consecutive >= PRACTICE_REQUIRED) practicePassed = true;
+    }
+    this.emit({ type: 'practice_info', message: practicePassed ? '연습 통과! 본 검사를 시작합니다.' : '본 검사를 시작합니다.', passed: true });
+    if (!this.isRunning) return this.fallbackMetrics();
+    await this.sleep(2000);
 
     // 본 검사
     const staircase = new AdaptiveStaircase(STAIRCASE_CONFIG);

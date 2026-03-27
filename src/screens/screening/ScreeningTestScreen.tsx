@@ -20,6 +20,7 @@ const C = {
   success:    '#00c853',
   errorRed:   '#b71c1c',
   errorBorder:'#e53935',
+  warning:    '#ffd740',
   textWhite:  '#ffffff',
   textMuted:  '#78909c',
   progressBg: '#132040',
@@ -47,6 +48,8 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [falsePosAlert, setFalsePosAlert] = useState(false);
   const [started, setStarted]             = useState(false);
   const [pressed, setPressed]             = useState(false);
+  const [practiceMsg, setPracticeMsg]     = useState('');
+  const [isPractice, setIsPractice]       = useState(false);
 
   const falsePosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,6 +109,13 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
           setBlockLabel(e.label);
           setShowModuleTransition(true);
           setTimeout(() => setShowModuleTransition(false), 2000);
+          break;
+        case 'practice_info':
+          setPracticeMsg(e.message);
+          setIsPractice(!e.passed);
+          if (e.passed) {
+            setTimeout(() => { setPracticeMsg(''); setIsPractice(false); }, 2000);
+          }
           break;
         case 'false_positive':
           showFalsePositive();
@@ -210,6 +220,14 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={s.progressText}>{progress} / {progressTotal}</Text>
           </View>
 
+          {/* 연습 메시지 */}
+          {practiceMsg !== '' && (
+            <View style={[s.practiceBanner, isPractice ? s.practiceBannerActive : s.practiceBannerPassed]}>
+              <Text style={s.practiceBannerLabel}>{isPractice ? '연습' : '준비 완료'}</Text>
+              <Text style={s.practiceBannerText}>{practiceMsg}</Text>
+            </View>
+          )}
+
           {/* 오경보 경고 */}
           {falsePosAlert && (
             <Animated.View style={[s.fpAlert, { transform: [{ translateX: shakeAnim }] }]}>
@@ -309,6 +327,12 @@ const s = StyleSheet.create({
   progressBar: { width: '100%', height: 5, backgroundColor: C.progressBg, borderRadius: 3 },
   progressFill: { height: 5, borderRadius: 3 },
   progressText: { color: C.textMuted, fontSize: 12, marginTop: 4 },
+
+  practiceBanner: { borderRadius: 12, paddingVertical: 10, paddingHorizontal: 20, marginBottom: 16, alignItems: 'center', width: '100%', maxWidth: 400 },
+  practiceBannerActive: { backgroundColor: 'rgba(255,215,64,0.15)', borderWidth: 1, borderColor: 'rgba(255,215,64,0.4)' },
+  practiceBannerPassed: { backgroundColor: 'rgba(0,200,83,0.15)', borderWidth: 1, borderColor: 'rgba(0,200,83,0.4)' },
+  practiceBannerLabel: { color: C.warning, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
+  practiceBannerText: { color: C.textWhite, fontSize: 14, fontWeight: '600', textAlign: 'center' },
 
   fpAlert: { backgroundColor: C.errorRed, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 20, marginBottom: 24 },
   fpAlertText: { color: '#fff', fontSize: 14, fontWeight: '600' },

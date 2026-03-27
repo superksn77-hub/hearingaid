@@ -18,7 +18,11 @@ const CATCH_RATIO    = 0.20;
 const TOTAL_TRIALS   = 80;
 const RESPONSE_WINDOW = 1500;
 
+const PRACTICE_REQUIRED = 2;  // 연속 정답 필요 수
+const PRACTICE_MAX_ROUNDS = 3;
+
 export type CPTEvent =
+  | { type: 'practice_info'; message: string; passed: boolean }
   | { type: 'trial_start'; trial: number; total: number; isCatch: boolean }
   | { type: 'tone_played' }
   | { type: 'false_positive' }
@@ -50,6 +54,10 @@ export class CPTEngine {
   async start(calibration: LatencyCalibration): Promise<CPTMetrics> {
     this.isRunning = true;
     this.latencyOffset = calibration.estimatedLatencyMs;
+
+    // ── 연습 단계: 2문제 연속 정답 시 통과 ──
+    await this.runPractice();
+    if (!this.isRunning) return this.emptyMetrics();
 
     const trials = this.generateTrialOrder();
     const allRTs: number[] = [];
@@ -134,6 +142,49 @@ export class CPTEngine {
   dispose() {
     this.stop();
     this.toneGen.dispose();
+  }
+
+  /** 연습: 순음 2회 연속 정답(들리면 누르기) 시 통과 */
+  private async runPractice(): Promise<void> {
+    for (let round = 0; round < PRACTICE_MAX_ROUNDS; round++) {
+      if (!this.isRunning) return;
+      this.emit({ type: 'practice_info', message: `연습 ${round + 1}/${PRACTICE_MAX_ROUNDS}: 소리가 들리면 누르세요`, passed: false });
+      await this.sleep(1500);
+
+      let consecutive = 0;
+      while (consecutive < PRACTICE_REQUIRED && this.isRunning) {
+        // ISI
+        await this.sleep(1000 + Math.random() * 1000);
+        if (!this.isRunning) return;
+
+        // 순음 재생
+        this.emit({ type: 'tone_played' });
+        await this.toneGen.playShortTone(TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'right');
+        const resp = await this.waitForResponse(RESPONSE_WINDOW);
+
+        if (resp !== null) {
+          consecutive++;
+          this.emit({ type: 'practice_info', message: `정답! (${consecutive}/${PRACTICE_REQUIRED})`, passed: false });
+        } else {
+          consecutive = 0;
+          this.emit({ type: 'practice_info', message: '소리가 들리면 빠르게 눌러주세요!', passed: false });
+        }
+        await this.sleep(800);
+      }
+
+      if (consecutive >= PRACTICE_REQUIRED) {
+        this.emit({ type: 'practice_info', message: '연습 통과! 본 검사를 시작합니다.', passed: true });
+        await this.sleep(2000);
+        return;
+      }
+    }
+    // 3라운드 실패해도 본 검사 진행
+    this.emit({ type: 'practice_info', message: '본 검사를 시작합니다.', passed: true });
+    await this.sleep(1500);
+  }
+
+  private emptyMetrics(): CPTMetrics {
+    return { rtMean: 0, rtStd: 0, rtTau: 0, rtMu: 0, rtSigma: 0, falsePositiveRate: 0, omissionRate: 0, totalTrials: 0, realTrials: 0, catchTrials: 0, allRTs: [] };
   }
 
   /** Promise 기반 응답 대기 — null = 무응답, number = 응답 시각 */

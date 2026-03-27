@@ -96,6 +96,7 @@ export type ScreeningModule = 'calibration' | 'ehfa' | 'cpt' | 'dlf' | 'gdt';
 export type ScreeningEngineEvent =
   | { type: 'module_switch'; module: ScreeningModule; label: string }
   | { type: 'block_switch'; label: string }
+  | { type: 'practice_info'; message: string; passed: boolean }
   | { type: 'progress'; module: ScreeningModule; current: number; total: number }
   | { type: 'tone_played' }
   | { type: 'noise_played' }

@@ -58,6 +58,7 @@ export class ScreeningCoordinator {
       if (e.type === 'progress') this.emit({ type: 'progress', module: 'cpt', current: e.current, total: e.total });
       if (e.type === 'tone_played') this.emit({ type: 'tone_played' });
       if (e.type === 'false_positive') this.emit({ type: 'false_positive', reason: 'catch' });
+      if (e.type === 'practice_info') this.emit(e);
     });
 
     this.dlfEngine.setListener(e => {
@@ -65,12 +66,14 @@ export class ScreeningCoordinator {
       if (e.type === 'awaiting_response') this.emit({ type: 'awaiting_response', mode: 'dual' });
       if (e.type === 'pair_playing') this.emit({ type: 'tone_played' });
       if (e.type === 'block_start') this.emit({ type: 'block_switch', label: e.label });
+      if (e.type === 'practice_info') this.emit(e);
     });
 
     this.gdtEngine.setListener(e => {
       if (e.type === 'progress') this.emit({ type: 'progress', module: 'gdt', current: e.current, total: e.total });
       if (e.type === 'noise_playing') this.emit({ type: 'noise_played' });
       if (e.type === 'awaiting_response') this.emit({ type: 'awaiting_response', mode: 'single' });
+      if (e.type === 'practice_info') this.emit(e);
     });
 
     let ehfaMetrics: EHFAMetrics | null = null;

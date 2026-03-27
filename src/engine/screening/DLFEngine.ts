@@ -38,9 +38,13 @@ const STAIRCASE_6K = {
   maxTrials: 15,
 };
 
+const PRACTICE_REQUIRED = 2;
+const PRACTICE_MAX_ROUNDS = 3;
+
 export type DLFEvent =
   | { type: 'block_start'; baseFreq: number; label: string }
   | { type: 'practice_start' }
+  | { type: 'practice_info'; message: string; passed: boolean }
   | { type: 'pair_playing'; baseFreq: number; delta: number }
   | { type: 'awaiting_response' }
   | { type: 'feedback'; correct: boolean }
@@ -108,15 +112,32 @@ export class DLFEngine {
     baseFreq: number,
     config: typeof STAIRCASE_1K
   ): Promise<{ threshold: number; reversals: number[] }> {
-    // 연습 시행 (피드백 포함)
+    // ── 연습: 2문제 연속 정답 시 통과, 최대 3라운드 ──
     this.emit({ type: 'practice_start' });
-    for (let p = 0; p < PRACTICE_TRIALS; p++) {
+    let practicePassed = false;
+    for (let round = 0; round < PRACTICE_MAX_ROUNDS && !practicePassed; round++) {
       if (!this.isRunning) break;
-      await this.runOneTrial(baseFreq, 15, true);
-    }
-    if (!this.isRunning) return { threshold: config.initial, reversals: [] };
+      this.emit({ type: 'practice_info', message: `연습 ${round + 1}/${PRACTICE_MAX_ROUNDS}: 두 소리가 같은지 다른지 판단하세요`, passed: false });
+      await this.sleep(1500);
 
-    await this.sleep(1000);
+      let consecutive = 0;
+      while (consecutive < PRACTICE_REQUIRED && this.isRunning) {
+        const correct = await this.runOneTrial(baseFreq, 15, true);
+        if (!this.isRunning) break;
+        if (correct) {
+          consecutive++;
+          this.emit({ type: 'practice_info', message: `정답! (${consecutive}/${PRACTICE_REQUIRED})`, passed: false });
+        } else {
+          consecutive = 0;
+          this.emit({ type: 'practice_info', message: '다시 들어보세요. 음이 다르면 "다른 소리"를 누르세요.', passed: false });
+        }
+        await this.sleep(800);
+      }
+      if (consecutive >= PRACTICE_REQUIRED) practicePassed = true;
+    }
+    this.emit({ type: 'practice_info', message: practicePassed ? '연습 통과! 본 검사를 시작합니다.' : '본 검사를 시작합니다.', passed: true });
+    if (!this.isRunning) return { threshold: config.initial, reversals: [] };
+    await this.sleep(2000);
 
     // 본 검사
     const staircase = new AdaptiveStaircase(config);
