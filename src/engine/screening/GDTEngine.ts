@@ -78,14 +78,14 @@ export class GDTEngine {
 
     // 본 검사
     const staircase = new AdaptiveStaircase(STAIRCASE_CONFIG);
-    let trialNum = 0;
+    let realTrialNum = 0;
+    let totalAttempts = 0;
+    const MAX_TOTAL_ATTEMPTS = 80; // catch 포함 절대 상한
 
-    while (this.isRunning) {
-      const gapMs = staircase.getValue();
-      trialNum++;
-      this.emit({ type: 'progress', current: trialNum, total: STAIRCASE_CONFIG.maxTrials });
+    while (this.isRunning && totalAttempts < MAX_TOTAL_ATTEMPTS) {
+      totalAttempts++;
 
-      // 30% catch trial
+      // 30% catch trial (카운터 증가 없이)
       const isCatch = Math.random() < CATCH_RATIO;
 
       if (isCatch) {
@@ -96,8 +96,13 @@ export class GDTEngine {
         } else {
           this.emit({ type: 'correct_rejection' });
         }
-        continue; // catch는 계단법에 반영 안 함
+        continue;
       }
+
+      // 실제 시행
+      const gapMs = staircase.getValue();
+      realTrialNum++;
+      this.emit({ type: 'progress', current: realTrialNum, total: STAIRCASE_CONFIG.maxTrials });
 
       const detected = await this.runOneTrial(gapMs, true);
       if (!this.isRunning) break;

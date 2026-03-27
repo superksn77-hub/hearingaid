@@ -43,6 +43,7 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [progressTotal, setProgressTotal] = useState(1);
   const [responseMode, setResponseMode]   = useState<'single' | 'dual'>('single');
   const [showModuleTransition, setShowModuleTransition] = useState(false);
+  const [blockLabel, setBlockLabel]       = useState('');
   const [falsePosAlert, setFalsePosAlert] = useState(false);
   const [started, setStarted]             = useState(false);
 
@@ -85,6 +86,11 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
           setProgressTotal(e.total);
           // progress 이벤트가 오면 전환 오버레이 해제
           setShowModuleTransition(false);
+          break;
+        case 'block_switch':
+          setBlockLabel(e.label);
+          setShowModuleTransition(true);
+          setTimeout(() => setShowModuleTransition(false), 2000);
           break;
         case 'false_positive':
           showFalsePositive();

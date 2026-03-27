@@ -64,6 +64,7 @@ export class ScreeningCoordinator {
       if (e.type === 'progress') this.emit({ type: 'progress', module: 'dlf', current: e.current, total: e.total });
       if (e.type === 'awaiting_response') this.emit({ type: 'awaiting_response', mode: 'dual' });
       if (e.type === 'pair_playing') this.emit({ type: 'tone_played' });
+      if (e.type === 'block_start') this.emit({ type: 'block_switch', label: e.label });
     });
 
     this.gdtEngine.setListener(e => {
