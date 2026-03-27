@@ -50,13 +50,26 @@ const STATUS_LABEL: Record<DeviceStatus, string> = {
   blocked:  '차단됨',
 };
 
+type SearchField = 'all' | 'name' | 'deviceId' | 'deviceType' | 'os' | 'browser';
+
+const SEARCH_FIELD_LABELS: Record<SearchField, string> = {
+  all:        '전체 필드',
+  name:       '이름',
+  deviceId:   '기기 번호',
+  deviceType: '기기 유형',
+  os:         'OS',
+  browser:    '브라우저',
+};
+
 export const AdminScreen: React.FC<Props> = ({ onClose }) => {
-  const [phase,   setPhase]   = useState<'login' | 'panel'>('login');
-  const [pw,      setPw]      = useState('');
-  const [pwError, setPwError] = useState('');
-  const [devices, setDevices] = useState<DeviceRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [filter,  setFilter]  = useState<DeviceStatus | 'all'>('all');
+  const [phase,       setPhase]       = useState<'login' | 'panel'>('login');
+  const [pw,          setPw]          = useState('');
+  const [pwError,     setPwError]     = useState('');
+  const [devices,     setDevices]     = useState<DeviceRecord[]>([]);
+  const [loading,     setLoading]     = useState(false);
+  const [filter,      setFilter]      = useState<DeviceStatus | 'all'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchField, setSearchField] = useState<SearchField>('all');
 
   const handleLogin = () => {
     if (pw === ADMIN_PASSWORD) {
@@ -116,7 +129,38 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     else { Alert.alert(title, msg); }
   }
 
-  const filtered = filter === 'all' ? devices : devices.filter(d => d.status === filter);
+  // ── 검색 + 상태 필터 복합 적용 ──────────────────────────────────────────
+  const q = searchQuery.trim().toLowerCase();
+
+  const matchesSearch = (d: DeviceRecord): boolean => {
+    if (!q) return true;
+    const check = (val?: string | null) =>
+      (val ?? '').toLowerCase().includes(q);
+    switch (searchField) {
+      case 'name':       return check(d.userName);
+      case 'deviceId':   return check(d.deviceId);
+      case 'deviceType': return check(d.deviceType);
+      case 'os':         return check(d.os);
+      case 'browser':    return check(d.browser);
+      case 'all':
+      default:
+        return (
+          check(d.userName)   ||
+          check(d.deviceId)   ||
+          check(d.deviceType) ||
+          check(d.os)         ||
+          check(d.browser)    ||
+          check(d.gpu)        ||
+          check(d.language)   ||
+          check(d.timezone)
+        );
+    }
+  };
+
+  const filtered = devices
+    .filter(d => filter === 'all' || d.status === filter)
+    .filter(matchesSearch);
+
   const counts = {
     all:      devices.length,
     pending:  devices.filter(d => d.status === 'pending').length,
@@ -196,6 +240,51 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         ))}
       </View>
 
+      {/* ── 검색 ─────────────────────────────────────────────────── */}
+      <View style={styles.searchSection}>
+        {/* 검색 입력창 */}
+        <View style={styles.searchInputWrap}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder={`${SEARCH_FIELD_LABELS[searchField]}으로 검색...`}
+            placeholderTextColor={C.muted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClear}>
+              <Text style={styles.searchClearText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* 필드 선택 칩 */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.fieldChipScroll}>
+          {(Object.keys(SEARCH_FIELD_LABELS) as SearchField[]).map(field => (
+            <TouchableOpacity
+              key={field}
+              style={[styles.fieldChip, searchField === field && styles.fieldChipActive]}
+              onPress={() => setSearchField(field)}
+            >
+              <Text style={[styles.fieldChipText, searchField === field && styles.fieldChipTextActive]}>
+                {SEARCH_FIELD_LABELS[field]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* 검색 결과 요약 */}
+        {!!searchQuery && (
+          <Text style={styles.searchResultText}>
+            "{searchQuery}" 검색 결과: {filtered.length}건
+            {filtered.length !== devices.length ? ` / 전체 ${devices.length}건` : ''}
+          </Text>
+        )}
+      </View>
+
       {loading && (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="small" color={C.cyan} />
@@ -204,7 +293,9 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
       )}
       {!loading && filtered.length === 0 && (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>등록된 기기가 없습니다.</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery ? `"${searchQuery}"에 해당하는 기기가 없습니다.` : '등록된 기기가 없습니다.'}
+          </Text>
         </View>
       )}
 
@@ -392,6 +483,52 @@ const styles = StyleSheet.create({
   loadingText:   { color: C.muted, fontSize: 14 },
   emptyBox:      { padding: 40, alignItems: 'center' },
   emptyText:     { color: C.muted, fontSize: 15 },
+
+  // 검색
+  searchSection: {
+    marginBottom: 16,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.cardBdr,
+    padding: 14,
+  },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.input,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.cardBdr,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  searchIcon: { fontSize: 15, marginRight: 8 },
+  searchInput: {
+    flex: 1,
+    color: C.white,
+    fontSize: 15,
+    paddingVertical: 11,
+  },
+  searchClear: { padding: 4, marginLeft: 4 },
+  searchClearText: { color: C.muted, fontSize: 14, fontWeight: '700' },
+  fieldChipScroll: { marginBottom: 8 },
+  fieldChip: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.dim,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 6,
+    backgroundColor: 'transparent',
+  },
+  fieldChipActive: {
+    borderColor: C.cyan,
+    backgroundColor: 'rgba(0,184,212,0.15)',
+  },
+  fieldChipText:       { fontSize: 12, color: C.muted, fontWeight: '600' },
+  fieldChipTextActive: { color: C.cyan },
+  searchResultText:    { fontSize: 12, color: C.cyan, marginTop: 4, fontWeight: '600' },
 
   // 기기 카드
   deviceCard: {
