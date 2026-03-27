@@ -46,9 +46,24 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
   const [blockLabel, setBlockLabel]       = useState('');
   const [falsePosAlert, setFalsePosAlert] = useState(false);
   const [started, setStarted]             = useState(false);
+  const [pressed, setPressed]             = useState(false);
 
   const falsePosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scaleAnim     = useRef(new Animated.Value(1)).current;
   const shakeAnim     = useRef(new Animated.Value(0)).current;
+
+  /** 버튼 눌림 이펙트 (터치 + 스페이스바 공용) */
+  const triggerPress = useCallback(() => {
+    setPressed(true);
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    // 축소 → 복원 애니메이션
+    Animated.sequence([
+      Animated.timing(scaleAnim, { toValue: 0.88, duration: 60, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+    pressTimer.current = setTimeout(() => setPressed(false), 200);
+  }, []);
 
   const triggerShake = () => {
     shakeAnim.setValue(0);
@@ -117,14 +132,18 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
     if (typeof document === 'undefined') return;
 
     const handleKey = (e: KeyboardEvent) => {
+      if (e.repeat) return; // 키 반복 무시
       if (e.code === 'Space' || e.key === ' ') {
         e.preventDefault();
+        triggerPress();
         coordRef.current.onUserResponse();
       } else if (e.key === '1') {
         e.preventDefault();
+        triggerPress();
         coordRef.current.onUserResponse('same');
       } else if (e.key === '2') {
         e.preventDefault();
+        triggerPress();
         coordRef.current.onUserResponse('different');
       }
     };
@@ -207,17 +226,23 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
                    currentModule === 'gdt' ? '틈(묵음)이 느껴지면 누르세요' :
                    '소리가 들리면 누르세요'}
                 </Text>
-                <TouchableOpacity
-                  style={[s.responseBtn, falsePosAlert && s.responseBtnError]}
-                  onPress={() => coordRef.current.onUserResponse()}
-                  activeOpacity={0.7}
-                >
-                  <View style={[s.responseBtnInner, { borderColor: falsePosAlert ? C.errorBorder : info.color }]}>
-                    <Text style={s.responseBtnText}>
-                      {currentModule === 'gdt' ? '감지!' : '들림!'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                  <TouchableOpacity
+                    style={[s.responseBtn, falsePosAlert && s.responseBtnError]}
+                    onPress={() => { triggerPress(); coordRef.current.onUserResponse(); }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[
+                      s.responseBtnInner,
+                      { borderColor: falsePosAlert ? C.errorBorder : info.color },
+                      pressed && s.responseBtnPressed,
+                    ]}>
+                      <Text style={s.responseBtnText}>
+                        {currentModule === 'gdt' ? '감지!' : '들림!'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
                 {Platform.OS === 'web' && (
                   <Text style={s.keyHint}>또는 스페이스바를 누르세요</Text>
                 )}
@@ -227,16 +252,16 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={s.instruction}>두 소리가 같은지 다른지 판단하세요</Text>
                 <View style={s.dualBtnRow}>
                   <TouchableOpacity
-                    style={[s.dualBtn, { borderColor: C.accentBlue }]}
-                    onPress={() => coordRef.current.onUserResponse('same')}
+                    style={[s.dualBtn, { borderColor: C.accentBlue }, pressed && s.dualBtnPressed]}
+                    onPress={() => { triggerPress(); coordRef.current.onUserResponse('same'); }}
                     activeOpacity={0.7}
                   >
                     <Text style={s.dualBtnText}>같은 소리</Text>
                     {Platform.OS === 'web' && <Text style={s.dualKeyHint}>키: 1</Text>}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[s.dualBtn, { borderColor: C.accentPurple }]}
-                    onPress={() => coordRef.current.onUserResponse('different')}
+                    style={[s.dualBtn, { borderColor: C.accentPurple }, pressed && s.dualBtnPressed]}
+                    onPress={() => { triggerPress(); coordRef.current.onUserResponse('different'); }}
                     activeOpacity={0.7}
                   >
                     <Text style={s.dualBtnText}>다른 소리</Text>
@@ -288,11 +313,13 @@ const s = StyleSheet.create({
   responseBtn: { width: 150, height: 150, borderRadius: 75, justifyContent: 'center', alignItems: 'center' },
   responseBtnError: {},
   responseBtnInner: { width: 140, height: 140, borderRadius: 70, backgroundColor: C.bgCard, borderWidth: 3, justifyContent: 'center', alignItems: 'center' },
+  responseBtnPressed: { backgroundColor: 'rgba(30,136,229,0.3)', borderWidth: 4 },
   responseBtnText: { color: C.textWhite, fontSize: 22, fontWeight: '700' },
   keyHint: { color: C.textMuted, fontSize: 12, marginTop: 16 },
 
   dualBtnRow: { flexDirection: 'row', gap: 20 },
   dualBtn: { width: 150, height: 100, borderRadius: 16, backgroundColor: C.bgCard, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  dualBtnPressed: { backgroundColor: 'rgba(30,136,229,0.2)', borderWidth: 3 },
   dualBtnText: { color: C.textWhite, fontSize: 17, fontWeight: '700' },
   dualKeyHint: { color: C.textMuted, fontSize: 11, marginTop: 6 },
 });
