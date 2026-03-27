@@ -351,6 +351,34 @@ const DetailBox: React.FC<{ label: string; value: string }> = ({ label, value })
 // ── PDF HTML 생성 ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
+function zBarHtml(label: string, value: string, z: number, maxZ = 3): string {
+  const pct = Math.min(100, Math.max(0, ((z + maxZ) / (2 * maxZ)) * 100));
+  const color = z > 2 ? '#e53935' : z > 1 ? '#ff9800' : z > 0 ? '#fdd835' : '#43a047';
+  const zLabel = z >= 0 ? `+${z.toFixed(1)}` : z.toFixed(1);
+  return `<div class="zbar-row">
+    <div class="zbar-label">${label}</div>
+    <div class="zbar-value">${value}</div>
+    <div class="zbar-track"><div class="zbar-normal"></div><div class="zbar-center"></div><div class="zbar-dot" style="left:${pct}%;background:${color}"></div></div>
+    <div class="zbar-z" style="color:${color}">Z=${zLabel}</div>
+  </div>`;
+}
+
+function riskGaugeHtml(label: string, pct: number, level: string): string {
+  const color = level === 'high' ? '#e53935' : level === 'moderate' ? '#ff9800' : '#43a047';
+  const bg = level === 'high' ? '#ffebee' : level === 'moderate' ? '#fff8e1' : '#e8f5e9';
+  const levelKo = level === 'high' ? '높음' : level === 'moderate' ? '중간' : '낮음';
+  const deg = Math.min(180, (pct / 100) * 180);
+  return `<div class="gauge-box" style="background:${bg}">
+    <svg viewBox="0 0 120 70" class="gauge-svg">
+      <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="#e0e0e0" stroke-width="8" stroke-linecap="round"/>
+      <path d="M10 65 A50 50 0 0 1 110 65" fill="none" stroke="${color}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${deg * 1.745} 999" opacity="0.8"/>
+      <text x="60" y="52" text-anchor="middle" font-size="22" font-weight="800" fill="${color}">${pct.toFixed(0)}%</text>
+      <text x="60" y="67" text-anchor="middle" font-size="9" fill="#666">${levelKo}</text>
+    </svg>
+    <div class="gauge-label">${label}</div>
+  </div>`;
+}
+
 function buildScreeningPdfHtml(
   result: ScreeningResult,
   scores: ScreeningScores,
@@ -361,14 +389,11 @@ function buildScreeningPdfHtml(
   const name = user?.name || '미지정';
   const age = user?.age || '-';
   const gender = user?.gender === 'male' ? '남성' : user?.gender === 'female' ? '여성' : '기타';
-
-  const adhdPct = (scores.pADHD * 100).toFixed(1);
-  const dysPct = (scores.pDyslexia * 100).toFixed(1);
   const ehfPct = (scores.riskEHF * 100).toFixed(1);
 
   const aiHtml = aiAnalysis
-    ? aiAnalysis.replace(/\n/g, '<br>').replace(/##\s*(.*?)(<br>|$)/g, '<h3 style="color:#1565c0;margin:16px 0 8px;">$1</h3>')
-    : '<p style="color:#999;">AI 분석 데이터 없음</p>';
+    ? aiAnalysis.replace(/\n/g, '<br>').replace(/##\s*(.*?)(<br>|$)/g, '<h3>$1</h3>')
+    : '<p class="no-data">AI 분석 데이터 없음</p>';
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -377,120 +402,179 @@ function buildScreeningPdfHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HICOG ADHD/난독증 스크리닝 보고서</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #f5f7fa; color: #333; padding: 24px; max-width: 900px; margin: 0 auto; }
-  .header { background: linear-gradient(135deg, #0d1b4b, #1565c0); color: white; padding: 32px; border-radius: 16px; text-align: center; margin-bottom: 24px; }
-  .header h1 { font-size: 22px; margin-bottom: 4px; }
-  .header p { opacity: 0.8; font-size: 13px; }
-  .meta { display: flex; gap: 24px; justify-content: center; margin-top: 12px; font-size: 14px; }
-  .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .card h2 { font-size: 16px; color: #0d1b4b; border-bottom: 2px solid #e3f2fd; padding-bottom: 8px; margin-bottom: 12px; }
-  .risk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .risk-box { text-align: center; padding: 20px; border-radius: 12px; }
-  .risk-box.adhd { background: ${scores.adhdLevel === 'high' ? '#ffebee' : scores.adhdLevel === 'moderate' ? '#fff8e1' : '#e8f5e9'}; }
-  .risk-box.dys { background: ${scores.dyslexiaLevel === 'high' ? '#ffebee' : scores.dyslexiaLevel === 'moderate' ? '#fff8e1' : '#e8f5e9'}; }
-  .risk-pct { font-size: 36px; font-weight: 800; }
-  .risk-label { font-size: 13px; color: #666; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 8px 12px; border: 1px solid #e0e0e0; text-align: center; }
-  th { background: #f5f5f5; font-weight: 600; color: #333; }
-  .z-bar { height: 8px; background: #e0e0e0; border-radius: 4px; position: relative; margin: 4px 0; }
-  .z-fill { height: 8px; border-radius: 4px; position: absolute; top: 0; }
-  .ai-section { background: #f3e5f5; border-left: 4px solid #7c4dff; padding: 16px; border-radius: 0 8px 8px 0; line-height: 1.8; font-size: 14px; }
-  .disclaimer { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; padding: 16px; font-size: 12px; color: #666; }
-  .print-btn { display: block; margin: 24px auto; padding: 12px 48px; background: #1565c0; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
-  @media print { .print-btn { display: none; } body { padding: 0; } .card { box-shadow: none; border: 1px solid #e0e0e0; } }
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Noto Sans KR',sans-serif; background:#f0f2f5; color:#1a1a2e; line-height:1.6; }
+  .page { max-width:860px; margin:0 auto; padding:32px 24px; }
+
+  /* ── Header ── */
+  .header { background:linear-gradient(135deg,#0f0c29,#302b63,#24243e); color:#fff; padding:40px 36px; border-radius:20px; position:relative; overflow:hidden; margin-bottom:28px; }
+  .header::before { content:''; position:absolute; top:-40px; right:-40px; width:200px; height:200px; background:radial-gradient(circle,rgba(99,102,241,0.3),transparent); border-radius:50%; }
+  .header::after { content:''; position:absolute; bottom:-60px; left:-30px; width:180px; height:180px; background:radial-gradient(circle,rgba(16,185,129,0.2),transparent); border-radius:50%; }
+  .header-content { position:relative; z-index:1; }
+  .logo-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+  .logo-icon { width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .header h1 { font-size:24px; font-weight:700; letter-spacing:-0.5px; }
+  .header-sub { font-size:13px; opacity:0.7; margin-bottom:20px; }
+  .meta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .meta-item { background:rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px; backdrop-filter:blur(4px); }
+  .meta-label { font-size:10px; opacity:0.6; text-transform:uppercase; letter-spacing:1px; }
+  .meta-val { font-size:15px; font-weight:600; margin-top:2px; }
+
+  /* ── Cards ── */
+  .card { background:#fff; border-radius:16px; padding:24px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.04),0 4px 12px rgba(0,0,0,0.03); border:1px solid rgba(0,0,0,0.04); }
+  .card-title { font-size:15px; font-weight:700; color:#302b63; margin-bottom:16px; padding-bottom:10px; border-bottom:2px solid #ede9fe; display:flex; align-items:center; gap:8px; }
+  .card-title .icon { width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; color:#fff; }
+
+  /* ── Gauge ── */
+  .gauge-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
+  .gauge-box { border-radius:16px; padding:20px; text-align:center; }
+  .gauge-svg { width:140px; height:80px; }
+  .gauge-label { font-size:13px; font-weight:600; color:#555; margin-top:4px; }
+
+  /* ── Z-bar ── */
+  .zbar-row { display:grid; grid-template-columns:140px 80px 1fr 60px; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #f5f5f5; }
+  .zbar-label { font-size:12px; font-weight:500; color:#444; }
+  .zbar-value { font-size:12px; font-weight:700; color:#1a1a2e; text-align:right; }
+  .zbar-track { height:10px; background:#f0f0f0; border-radius:5px; position:relative; overflow:visible; }
+  .zbar-normal { position:absolute; left:33.3%; width:33.3%; height:100%; background:rgba(67,160,71,0.1); border-radius:5px; }
+  .zbar-center { position:absolute; left:50%; width:1px; height:100%; background:#ccc; }
+  .zbar-dot { position:absolute; top:-1px; width:12px; height:12px; border-radius:6px; margin-left:-6px; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,0.2); }
+  .zbar-z { font-size:11px; font-weight:700; text-align:right; }
+
+  /* ── Tables ── */
+  table { width:100%; border-collapse:separate; border-spacing:0; font-size:12px; border-radius:10px; overflow:hidden; border:1px solid #e8e8e8; }
+  th { background:linear-gradient(135deg,#f8f9ff,#f0f1ff); color:#302b63; font-weight:600; padding:10px 14px; text-align:center; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:10px 14px; text-align:center; border-top:1px solid #f0f0f0; }
+  tr:hover td { background:#fafbff; }
+  .status-ok { color:#43a047; font-weight:600; }
+  .status-warn { color:#e53935; font-weight:600; }
+
+  /* ── AI Section ── */
+  .ai-box { background:linear-gradient(135deg,#faf5ff,#f3e8ff); border-left:4px solid #7c3aed; border-radius:0 12px 12px 0; padding:20px; line-height:1.9; font-size:13px; color:#333; }
+  .ai-box h3 { color:#5b21b6; font-size:14px; margin:16px 0 6px; font-weight:700; }
+  .no-data { color:#aaa; font-style:italic; }
+
+  /* ── Recommendations ── */
+  .rec-list { list-style:none; padding:0; }
+  .rec-list li { padding:10px 14px; margin-bottom:6px; background:#f8fafc; border-radius:8px; border-left:3px solid #6366f1; font-size:13px; line-height:1.6; }
+
+  /* ── Disclaimer ── */
+  .disclaimer { background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:16px 20px; font-size:11px; color:#92400e; line-height:1.7; }
+  .disclaimer strong { color:#b45309; }
+
+  /* ── Footer ── */
+  .footer { text-align:center; padding:24px; color:#aaa; font-size:10px; border-top:1px solid #eee; margin-top:20px; }
+  .footer .brand { font-weight:700; color:#6366f1; font-size:11px; }
+
+  /* ── Print ── */
+  .print-actions { text-align:center; margin:24px 0; }
+  .btn { display:inline-block; padding:12px 36px; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.2s; }
+  .btn-primary { background:linear-gradient(135deg,#6366f1,#4f46e5); color:#fff; box-shadow:0 4px 12px rgba(99,102,241,0.3); }
+  .btn-primary:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(99,102,241,0.4); }
+  @media print { .print-actions{display:none;} body{background:#fff;} .card{box-shadow:none;border:1px solid #ddd;} .header{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
 </style>
 </head>
 <body>
+<div class="page">
 
+<!-- Header -->
 <div class="header">
-  <h1>HICOG ADHD / 난독증 스크리닝 보고서</h1>
-  <p>Pure-Tone Audiometry Based Cognitive-Auditory Screening</p>
-  <div class="meta">
-    <span>이름: ${name}</span>
-    <span>나이: ${age}세</span>
-    <span>성별: ${gender}</span>
-    <span>검사일: ${date}</span>
+  <div class="header-content">
+    <div class="logo-row">
+      <div class="logo-icon">&#x1F9E0;</div>
+      <h1>ADHD / 난독증 스크리닝 보고서</h1>
+    </div>
+    <div class="header-sub">HICOG Pure-Tone Audiometry Based Cognitive-Auditory Screening Report</div>
+    <div class="meta-grid">
+      <div class="meta-item"><div class="meta-label">이름</div><div class="meta-val">${name}</div></div>
+      <div class="meta-item"><div class="meta-label">나이</div><div class="meta-val">${age}세</div></div>
+      <div class="meta-item"><div class="meta-label">성별</div><div class="meta-val">${gender}</div></div>
+      <div class="meta-item"><div class="meta-label">검사일</div><div class="meta-val">${date}</div></div>
+    </div>
   </div>
 </div>
 
-<div class="risk-grid">
-  <div class="risk-box adhd">
-    <div class="risk-pct" style="color:${scores.adhdLevel === 'high' ? '#d32f2f' : scores.adhdLevel === 'moderate' ? '#f57f17' : '#2e7d32'}">${adhdPct}%</div>
-    <div class="risk-label">ADHD 위험도 (${scores.adhdLevel === 'high' ? '높음' : scores.adhdLevel === 'moderate' ? '중간' : '낮음'})</div>
+<!-- Risk Gauges -->
+<div class="gauge-row">
+  ${riskGaugeHtml('ADHD 위험도', scores.pADHD * 100, scores.adhdLevel)}
+  ${riskGaugeHtml('난독증 위험도', scores.pDyslexia * 100, scores.dyslexiaLevel)}
+</div>
+
+<!-- CPT -->
+<div class="card">
+  <div class="card-title"><span class="icon" style="background:#f59e0b">&#x26A1;</span> 주의력 검사 (CPT)</div>
+  ${zBarHtml('RT τ (주의력 일탈)', `${result.cpt.rtTau}ms`, scores.zScores.rtTau)}
+  ${zBarHtml('오경보율 (FPR)', `${(result.cpt.falsePositiveRate*100).toFixed(1)}%`, scores.zScores.fpr)}
+  ${zBarHtml('누락률 (OER)', `${(result.cpt.omissionRate*100).toFixed(1)}%`, scores.zScores.oer)}
+  ${zBarHtml('평균 반응시간', `${result.cpt.rtMean}ms`, scores.zScores.rtMean)}
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;">
+    <div style="background:#f8f9ff;border-radius:8px;padding:8px 12px;text-align:center"><div style="font-size:10px;color:#888">μ (기본속도)</div><div style="font-size:16px;font-weight:700">${result.cpt.rtMu}ms</div></div>
+    <div style="background:#f8f9ff;border-radius:8px;padding:8px 12px;text-align:center"><div style="font-size:10px;color:#888">σ (변동성)</div><div style="font-size:16px;font-weight:700">${result.cpt.rtStd}ms</div></div>
+    <div style="background:#f8f9ff;border-radius:8px;padding:8px 12px;text-align:center"><div style="font-size:10px;color:#888">총 시행</div><div style="font-size:16px;font-weight:700">${result.cpt.totalTrials}회</div></div>
   </div>
-  <div class="risk-box dys">
-    <div class="risk-pct" style="color:${scores.dyslexiaLevel === 'high' ? '#d32f2f' : scores.dyslexiaLevel === 'moderate' ? '#f57f17' : '#2e7d32'}">${dysPct}%</div>
-    <div class="risk-label">난독증 위험도 (${scores.dyslexiaLevel === 'high' ? '높음' : scores.dyslexiaLevel === 'moderate' ? '중간' : '낮음'})</div>
-  </div>
 </div>
 
+<!-- DLF + GDT -->
 <div class="card">
-  <h2>1. 주의력 검사 (CPT) 결과</h2>
-  <table>
-    <tr><th>지표</th><th>측정값</th><th>Z점수</th><th>해석</th></tr>
-    <tr><td>RT τ (주의력 일탈)</td><td>${result.cpt.rtTau}ms</td><td>${scores.zScores.rtTau.toFixed(1)}</td><td>${scores.zScores.rtTau > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-    <tr><td>오경보율 (FPR)</td><td>${(result.cpt.falsePositiveRate * 100).toFixed(1)}%</td><td>${scores.zScores.fpr.toFixed(1)}</td><td>${scores.zScores.fpr > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-    <tr><td>누락률 (OER)</td><td>${(result.cpt.omissionRate * 100).toFixed(1)}%</td><td>${scores.zScores.oer.toFixed(1)}</td><td>${scores.zScores.oer > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-    <tr><td>평균 RT</td><td>${result.cpt.rtMean}ms</td><td>${scores.zScores.rtMean.toFixed(1)}</td><td>-</td></tr>
-    <tr><td>RT μ</td><td>${result.cpt.rtMu}ms</td><td>-</td><td>기본 처리 속도</td></tr>
-    <tr><td>RT σ</td><td>${result.cpt.rtStd}ms</td><td>-</td><td>반응 일관성</td></tr>
-  </table>
+  <div class="card-title"><span class="icon" style="background:#7c3aed">&#x1F3B5;</span> 주파수 변별 (DLF) 및 간격 탐지 (GDT)</div>
+  ${zBarHtml('DLF 1kHz', `${result.dlf.dlf1k.toFixed(1)}%`, scores.zScores.dlf1k)}
+  ${zBarHtml('DLF 6kHz', `${result.dlf.dlf6k.toFixed(1)}%`, scores.zScores.dlf6k)}
+  ${zBarHtml('간격 탐지 (GDT)', `${result.gdt.gdt.toFixed(1)}ms`, scores.zScores.gdt)}
 </div>
 
+<!-- EHFA -->
 <div class="card">
-  <h2>2. 주파수 변별 (DLF) 및 간격 탐지 (GDT)</h2>
-  <table>
-    <tr><th>지표</th><th>측정값</th><th>Z점수</th><th>해석</th></tr>
-    <tr><td>DLF 1kHz</td><td>${result.dlf.dlf1k.toFixed(1)}%</td><td>${scores.zScores.dlf1k.toFixed(1)}</td><td>${scores.zScores.dlf1k > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-    <tr><td>DLF 6kHz</td><td>${result.dlf.dlf6k.toFixed(1)}%</td><td>${scores.zScores.dlf6k.toFixed(1)}</td><td>${scores.zScores.dlf6k > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-    <tr><td>GDT</td><td>${result.gdt.gdt.toFixed(1)}ms</td><td>${scores.zScores.gdt.toFixed(1)}</td><td>${scores.zScores.gdt > 1.5 ? '⚠️ 상승' : '정상'}</td></tr>
-  </table>
-</div>
-
-<div class="card">
-  <h2>3. 확장 고주파 청력 (EHFA)</h2>
+  <div class="card-title"><span class="icon" style="background:#0891b2">&#x1F50A;</span> 확장 고주파 청력 (EHFA)</div>
   <table>
     <tr><th>주파수</th><th>역치 (dB HL)</th><th>판정</th></tr>
-    <tr><td>10 kHz</td><td>${result.ehfa.thresholds[10000] ?? 'N/A'}</td><td>${(result.ehfa.thresholds[10000] ?? 0) > 25 ? '⚠️ 저하' : '정상'}</td></tr>
-    <tr><td>12.5 kHz</td><td>${result.ehfa.thresholds[12500] ?? 'N/A'}</td><td>${(result.ehfa.thresholds[12500] ?? 0) > 25 ? '⚠️ 저하' : '정상'}</td></tr>
-    <tr><td>16 kHz</td><td>${result.ehfa.thresholds[16000] ?? 'N/A'}</td><td>${(result.ehfa.thresholds[16000] ?? 0) > 25 ? '⚠️ 저하' : '정상'}</td></tr>
-    <tr><td><b>PTA_EHF</b></td><td><b>${result.ehfa.ptaEHF} dB</b></td><td>${result.ehfa.ptaEHF > 25 ? '⚠️ 숨은 난청 위험' : '정상'}</td></tr>
+    <tr><td>10 kHz</td><td>${result.ehfa.thresholds[10000] ?? 'N/A'}</td><td class="${(result.ehfa.thresholds[10000]??0)>25?'status-warn':'status-ok'}">${(result.ehfa.thresholds[10000]??0)>25?'저하':'정상'}</td></tr>
+    <tr><td>12.5 kHz</td><td>${result.ehfa.thresholds[12500] ?? 'N/A'}</td><td class="${(result.ehfa.thresholds[12500]??0)>25?'status-warn':'status-ok'}">${(result.ehfa.thresholds[12500]??0)>25?'저하':'정상'}</td></tr>
+    <tr><td>16 kHz</td><td>${result.ehfa.thresholds[16000] ?? 'N/A'}</td><td class="${(result.ehfa.thresholds[16000]??0)>25?'status-warn':'status-ok'}">${(result.ehfa.thresholds[16000]??0)>25?'저하':'정상'}</td></tr>
+    <tr style="font-weight:700"><td>PTA_EHF</td><td>${result.ehfa.ptaEHF} dB</td><td class="${result.ehfa.ptaEHF>25?'status-warn':'status-ok'}">${result.ehfa.ptaEHF>25?'숨은 난청 위험':'정상'}</td></tr>
   </table>
-  <p style="margin-top:8px;font-size:12px;color:#666;">숨은 난청 위험도: ${ehfPct}%</p>
+  <div style="margin-top:8px;font-size:11px;color:#888;">숨은 난청 위험도: ${ehfPct}%</div>
 </div>
 
+<!-- AI Analysis -->
 <div class="card">
-  <h2>4. AI 종합 분석</h2>
-  <div class="ai-section">${aiHtml}</div>
+  <div class="card-title"><span class="icon" style="background:#7c3aed">&#x1F916;</span> AI 종합 분석</div>
+  <div class="ai-box">${aiHtml}</div>
 </div>
 
+<!-- Recommendations -->
 <div class="card">
-  <h2>5. 권고사항</h2>
-  <ul style="padding-left:20px;line-height:2;">
+  <div class="card-title"><span class="icon" style="background:#059669">&#x2705;</span> 권고사항</div>
+  <ul class="rec-list">
     ${scores.recommendations.map(r => `<li>${r}</li>`).join('\n    ')}
   </ul>
 </div>
 
+<!-- Disclaimer -->
 <div class="disclaimer">
-  <strong>⚠ 주의사항:</strong> 본 검사는 ADHD 및 난독증의 스크리닝(선별) 목적으로만 사용되며, 확정 진단을 위한 것이 아닙니다.
+  <strong>&#x26A0; 주의사항:</strong> 본 검사는 ADHD 및 난독증의 스크리닝(선별) 목적으로만 사용되며, 확정 진단을 위한 것이 아닙니다.
   결과는 전문 의료기관의 종합적인 신경심리 평가를 대체할 수 없습니다.
   검사 환경(소음, 이어폰 품질, 기기 성능)에 따라 결과가 영향받을 수 있습니다.
 </div>
 
-<p style="text-align:center;margin-top:24px;font-size:11px;color:#999;">
-  HICOG Hearing Intelligence Cognitive Screening System v1.0<br>
-  Generated: ${new Date().toISOString()}
-</p>
+<!-- Footer -->
+<div class="footer">
+  <div class="brand">HICOG</div>
+  Hearing Intelligence Cognitive Screening System v1.0<br>
+  Generated: ${new Date().toISOString().slice(0,19).replace('T',' ')}
+</div>
 
-<button class="print-btn" onclick="window.print()">인쇄 / PDF 저장</button>
+<!-- Print Button -->
+<div class="print-actions">
+  <button class="btn btn-primary" onclick="window.print()">&#x1F5A8; 인쇄 / PDF 저장</button>
+</div>
+
+</div><!-- .page -->
 
 <script>
-  // PC 브라우저에서는 자동 인쇄 대화상자
-  if (!/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
-    setTimeout(() => window.print(), 800);
-  }
+if (!/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
+  setTimeout(() => window.print(), 1000);
+}
 </script>
 </body>
 </html>`;
