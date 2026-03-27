@@ -67,7 +67,8 @@ export class AdaptiveStaircase {
 
   getThreshold(): number {
     if (this.reversals.length === 0) return this.value;
-    const useCount = Math.min(6, this.reversals.length);
+    // 마지막 N개 reversal 평균 (targetReversals - 2, 최소 2개)
+    const useCount = Math.min(Math.max(2, this.targetReversals - 2), this.reversals.length);
     const last = this.reversals.slice(-useCount);
     return last.reduce((a, b) => a + b, 0) / last.length;
   }

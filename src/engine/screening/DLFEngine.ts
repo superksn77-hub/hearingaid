@@ -13,17 +13,19 @@ import { DLFMetrics } from '../../types/screening';
 const TONE_DURATION   = 300;  // ms per tone
 const GAP_BETWEEN     = 200;  // ms between two tones
 const TONE_AMPLITUDE  = 0.25;
-const PRACTICE_TRIALS = 3;
+const PRACTICE_TRIALS = 2;
 const RESPONSE_TIMEOUT = 5000; // ms
 
+// 스크리닝 목적: 블록당 최대 15시행, 6 reversal 수렴
+// 2블록(1kHz+6kHz) = 총 최대 30시행
 const STAIRCASE_1K = {
   initial: 10,
   stepFactor: 1.41,
   minVal: 0.1,
   maxVal: 25,
   nDown: 2,
-  targetReversals: 8,
-  maxTrials: 60,
+  targetReversals: 6,
+  maxTrials: 15,
 };
 
 const STAIRCASE_6K = {
@@ -32,8 +34,8 @@ const STAIRCASE_6K = {
   minVal: 0.1,
   maxVal: 25,
   nDown: 2,
-  targetReversals: 8,
-  maxTrials: 60,
+  targetReversals: 6,
+  maxTrials: 15,
 };
 
 export type DLFEvent =
