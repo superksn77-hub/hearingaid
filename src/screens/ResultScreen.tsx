@@ -271,7 +271,36 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑦ 심혈관질환 — 고주파 OR 4.39, 저중주파 HDL OR 2.20
+  // ⑦ 발달성 난독증 / 중추 청각 처리 장애 (APD)
+  // ══════════════════════════════════════════════════════════════════
+  // 조건: 소아이거나, 청소년/젊은 성인이며 PTA가 비교적 낮은(≤25 dB) 고주파 경사형
+  if (isChild || (isYoungAdult && avgPTA <= 25)) {
+    const normalPTA = avgPTA <= 20;
+    risks.push({
+      id: 'dyslexia', icon: '📖',
+      title: '발달성 난독증 · 중추 청각 처리 장애(APD)',
+      subtitle: normalPTA
+        ? 'PTA 정상이어도 음운·주파수 변별 결함 가능'
+        : '청각처리 결함 → 읽기·음운 인식 장애 연관',
+      level: isChild ? 'caution' : 'info',
+      description: '순음 역치가 정상 범위여도 대뇌 청각피질의 주파수 변별 능력이 저하되면 음운 인식이 어려워 발달성 난독증으로 이어질 수 있습니다.',
+      detail: [
+        normalPTA
+          ? `현재 PTA ${avgPTA} dB HL로 정상 범위이지만, 발달성 난독증 아동은 역치가 정상임에도 순음 주파수 변별(Frequency Discrimination, FD) 능력이 유의미하게 저하됩니다.`
+          : `PTA ${avgPTA} dB HL — 경계성 청력이라도 중추 청각 처리 능력 저하가 동반되면 음운 인식 결함이 심화될 수 있습니다.`,
+        `EEG 연구에서 난독증 아동은 청각피질의 α(알파)·β(베타)·γ1(감마1) 신경 네트워크가 비정상 패턴을 보이며, 특히 전두엽-감각 영역 간 허브 연결(hub connectivity)이 소실됩니다.`,
+        `음운 인식(phonemic awareness) 결함은 읽기 습득 실패의 핵심 기전으로, 청각적 주파수 변별 능력과 직접 연관됩니다.`,
+        `권장 검사: ① 순음청력검사(PTA) + ② 순음 주파수 변별 검사(FD Test) 병행 → 조기 난독증 바이오마커로 활용 가능.`,
+        isChild
+          ? `소아에서 학습 부진·글자 인식 어려움이 동반된다면 APD 전문 청각사 또는 소아신경과 협진을 권장합니다.`
+          : `청소년/성인에서도 지속적인 읽기 어려움이 있다면 중추 청각 처리 장애(APD) 정밀 평가를 고려하십시오.`,
+      ].join(' '),
+      source: 'EEG α·β·γ1 청각피질 연구 · Frontal-sensory hub connectivity 난독증 연구 · PTA+FD 조기 바이오마커 연구',
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ⑧ 심혈관질환 — 고주파 OR 4.39, 저중주파 HDL OR 2.20
   // ══════════════════════════════════════════════════════════════════
   const chdHighFreq = highFreqAvg > 40;
   const hdlLowMid   = lowMidAvg > 25;
@@ -305,7 +334,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑧ 제2형 당뇨병 · 미세혈관병증
+  // ⑨ 제2형 당뇨병 · 미세혈관병증
   // ══════════════════════════════════════════════════════════════════
   if (hasHighFreqSlope || avgPTA > 25) {
     const dmAgeNote = isMiddleAge
@@ -325,7 +354,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑨ 만성 신장질환(CKD) — 병기별 유병률 매핑
+  // ⑩ 만성 신장질환(CKD) — 병기별 유병률 매핑
   // ══════════════════════════════════════════════════════════════════
   if (avgPTA > 25 || highFreqAvg > 25) {
     let ckdStageGuess = '';
@@ -345,7 +374,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑩ SLE(루푸스) · 자가면역 내이질환
+  // ⑪ SLE(루푸스) · 자가면역 내이질환
   // ══════════════════════════════════════════════════════════════════
   const autoimmuneSuspect =
     (isFemale && (isYoungAdult || isMiddleAge)) ||
@@ -367,7 +396,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑪ 비타민 D 결핍 — 연령·성별 특이성
+  // ⑫ 비타민 D 결핍 — 연령·성별 특이성
   // ══════════════════════════════════════════════════════════════════
   {
     let vitDLevel: HealthRisk['level'] = 'info';
@@ -398,7 +427,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑫ 철 결핍성 빈혈(IDA) — 연령·성별 특이성
+  // ⑬ 철 결핍성 빈혈(IDA) — 연령·성별 특이성
   // ══════════════════════════════════════════════════════════════════
   if (isChild || isReproductiveF || avgPTA > 25) {
     const idaLevel: HealthRisk['level'] = (isReproductiveF || isChild) ? 'caution' : 'info';
@@ -419,7 +448,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑬ 골다공증 · 낙상·골절 위험
+  // ⑭ 골다공증 · 낙상·골절 위험
   // ══════════════════════════════════════════════════════════════════
   if (isPostMenopausal || isElderly) {
     const osteoLevel: HealthRisk['level'] =
@@ -450,7 +479,7 @@ function analyzeHealthRisks(result: TestResult, ageStr?: string, genderArg?: str
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ⑭ 노인성 난청 아형 분석
+  // ⑮ 노인성 난청 아형 분석
   // ══════════════════════════════════════════════════════════════════
   if (avgPTA > 20) {
     if (isFlat && isSeniorPlus) {
