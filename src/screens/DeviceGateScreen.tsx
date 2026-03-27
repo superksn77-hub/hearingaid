@@ -61,20 +61,45 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
   const [nameError,     setNameError]     = useState('');
   const [submitting,    setSubmitting]    = useState(false);
   const [nameSubmitted, setNameSubmitted] = useState(false);
+  // 이름 입력 중 실시간으로 미리보기 ID 계산용
+  const [previewId,     setPreviewId]     = useState('');
 
+  // 이름 유효성 검사
+  const validateName = (name: string): string | null => {
+    if (!name) return '이름을 입력해주세요.';
+    if (name.length < 2) return '이름은 2글자 이상 입력해주세요.';
+    if (name.length > 20) return '이름은 20자 이하로 입력해주세요.';
+    if (/^[\u3131-\u318E\s]+$/.test(name)) return '올바른 이름을 입력해주세요. (예: 홍길동)';
+    if (/^\d+$/.test(name)) return '이름에는 문자가 포함되어야 합니다.';
+    return null;
+  };
+
+  // 이름이 2글자 이상 입력될 때마다 기기 ID 미리 계산
+  const handleNameChange = useCallback(async (text: string) => {
+    setUserName(text);
+    setNameError('');
+    if (text.trim().length >= 2) {
+      const id = await generateDeviceFingerprint(text.trim());
+      setPreviewId(id);
+    } else {
+      setPreviewId('');
+    }
+  }, []);
+
+  // 초기화: 이름 없이 하드웨어만으로 1차 체크 (이미 등록된 기기 감지)
   const init = useCallback(async () => {
     setGateState('loading');
     try {
-      const id = await generateDeviceFingerprint();
-      setDeviceId(id);
+      // 이름 없이 하드웨어 기반 ID 생성 → Firebase 중복 체크 시도
+      const hwId = await generateDeviceFingerprint('');
+      setDeviceId(hwId);
       setMode(getBackendMode());
       setGateState('checking');
 
-      const status: DeviceStatus | null = await checkDeviceStatus(id);
+      const status: DeviceStatus | null = await checkDeviceStatus(hwId);
 
-      // 이미 등록된 기기 → 최신 기기 정보 자동 갱신 (백그라운드)
       if (status !== null) {
-        refreshDeviceInfo(id).catch(() => {});
+        refreshDeviceInfo(hwId).catch(() => {});
       }
 
       if (status === 'approved') {
@@ -92,19 +117,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     }
   }, []);
 
-  // 이름 유효성 검사
-  const validateName = (name: string): string | null => {
-    if (!name) return '이름을 입력해주세요.';
-    if (name.length < 2) return '이름은 2글자 이상 입력해주세요.';
-    if (name.length > 20) return '이름은 20자 이하로 입력해주세요.';
-    // 한글 자모만 있는 경우 차단 (ㄱ,ㄴ,ㅣ 등 단독 자모)
-    if (/^[\u3131-\u318E\s]+$/.test(name)) return '올바른 이름을 입력해주세요. (예: 홍길동)';
-    // 숫자만 있는 경우 차단
-    if (/^\d+$/.test(name)) return '이름에는 문자가 포함되어야 합니다.';
-    return null;
-  };
-
-  // 이름 입력 후 등록 신청
+  // 이름 입력 후 등록 신청 — 이름+하드웨어 조합 ID로 최종 등록
   const handleSubmitName = useCallback(async () => {
     const name = userName.trim();
     const err = validateName(name);
@@ -115,14 +128,17 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     setNameError('');
     setSubmitting(true);
     try {
-      await registerDevice(deviceId, name);
+      // 이름+하드웨어 조합으로 최종 ID 생성
+      const finalId = await generateDeviceFingerprint(name);
+      setDeviceId(finalId);
+      await registerDevice(finalId, name);
       setNameSubmitted(true);
     } catch (e) {
       console.error('[DeviceGate] 등록 오류:', e);
     } finally {
       setSubmitting(false);
     }
-  }, [deviceId, userName]);
+  }, [userName]);
 
   // 승인 완료 재확인
   const handleCheckApproval = useCallback(async () => {
@@ -270,11 +286,21 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
               placeholder="이름을 입력하세요 (예: 홍길동)"
               placeholderTextColor={C.muted}
               value={userName}
-              onChangeText={text => { setUserName(text); setNameError(''); }}
+              onChangeText={handleNameChange}
               returnKeyType="done"
               onSubmitEditing={handleSubmitName}
             />
             {!!nameError && <Text style={styles.nameErrorText}>{nameError}</Text>}
+            {/* 이름 입력 중 기기 ID 미리보기 */}
+            {!!previewId && !nameError && (
+              <View style={styles.previewIdBox}>
+                <Text style={styles.previewIdLabel}>이 이름으로 생성될 기기 번호</Text>
+                <Text style={styles.previewIdValue}>{previewId}</Text>
+                <Text style={styles.previewIdHint}>
+                  ✓ 이름 + 컴퓨터 하드웨어 조합 — 쿠키 삭제와 무관하게 동일한 번호가 유지됩니다
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -286,8 +312,10 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
           </View>
         )}
 
-        {/* 기기 번호 */}
-        <DeviceIdBox deviceId={deviceId} copied={copied} onCopy={handleCopy} />
+        {/* 기기 번호 (등록 신청 후) */}
+        {nameSubmitted && (
+          <DeviceIdBox deviceId={deviceId} copied={copied} onCopy={handleCopy} />
+        )}
 
         {/* 안내 */}
         <View style={styles.infoBox}>
@@ -471,6 +499,25 @@ const styles = StyleSheet.create({
   },
   nameInputError:  { borderColor: C.red },
   nameErrorText:   { color: C.red, fontSize: 12, marginTop: 6, textAlign: 'center' },
+
+  // 이름 입력 중 기기 ID 미리보기
+  previewIdBox: {
+    marginTop: 10,
+    backgroundColor: 'rgba(0,184,212,0.07)',
+    borderWidth: 1, borderColor: 'rgba(0,184,212,0.25)',
+    borderRadius: 10, padding: 12, alignItems: 'center',
+  },
+  previewIdLabel: {
+    fontSize: 10, color: C.cyan, fontWeight: '700',
+    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6,
+  },
+  previewIdValue: {
+    fontSize: 20, fontWeight: '900', color: C.cyan,
+    letterSpacing: 3, fontVariant: ['tabular-nums'], marginBottom: 6,
+  },
+  previewIdHint: {
+    fontSize: 10, color: C.muted, textAlign: 'center', lineHeight: 15,
+  },
   nameConfirmed: {
     width: '100%',
     backgroundColor: 'rgba(0,200,83,0.08)',

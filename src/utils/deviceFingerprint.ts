@@ -1,22 +1,31 @@
 /**
  * 브라우저 환경에서 기기 고유 번호(Device Fingerprint)를 생성합니다.
  *
- * ▸ 핵심 원칙: 한 번 생성된 ID는 localStorage에 저장되어 영구적으로 고정됩니다.
- *   브라우저 업데이트·앱 재배포·Canvas 렌더링 변화의 영향을 받지 않습니다.
+ * ▸ 핵심 원칙: 쿠키·localStorage 와 무관하게 하드웨어 신호 + 사용자 이름으로
+ *   결정론적(deterministic) ID를 생성합니다.
+ *   같은 사람이 같은 컴퓨터를 쓰면 항상 동일한 ID가 나옵니다.
  *
- * 결과 포맷: XXXX-XXXX-XXXX-XXXX (대문자 hex 16자를 4자리씩 묶음)
+ * 구성 요소:
+ *   사용자 이름  – 같은 컴퓨터라도 사용자별로 다른 ID 부여
+ *   WebGL GPU   – 그래픽카드 벤더·렌더러 (매우 안정적)
+ *   화면 해상도  – 가로×세로×색상깊이
+ *   CPU 코어수   – navigator.hardwareConcurrency
+ *   RAM 크기     – navigator.deviceMemory (지원 브라우저)
+ *   타임존       – Asia/Seoul 등
+ *   언어         – ko-KR 등
+ *   플랫폼       – Win32 / MacIntel / Linux x86_64 등
+ *
+ * 결과 포맷: XXXX-XXXX-XXXX-XXXX
  */
-
-/** localStorage 저장 키 — 최종 포맷된 기기 ID를 직접 저장 */
-const LS_DEVICE_ID_KEY = 'hicog_device_id_v2';
-/** localStorage 저장 키 — 내부 랜덤 시드 (하위 호환) */
-const LS_UUID_KEY = 'hicog_device_uuid_v1';
 
 // ── SHA-256 해시 ──────────────────────────────────────────────────────────
 async function sha256(text: string): Promise<string> {
   try {
     if (typeof crypto !== 'undefined' && crypto.subtle) {
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      const buf = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(text),
+      );
       return Array.from(new Uint8Array(buf))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
@@ -28,34 +37,22 @@ async function sha256(text: string): Promise<string> {
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// ── 랜덤 UUID (localStorage 영구 보관) ──────────────────────────────────
-function getOrCreateLocalUUID(): string {
-  try {
-    let id = localStorage.getItem(LS_UUID_KEY);
-    if (!id) {
-      id = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      localStorage.setItem(LS_UUID_KEY, id);
-    }
-    return id;
-  } catch (_) {
-    return `fb-${Date.now().toString(36)}`;
-  }
-}
-
-// ── WebGL 핑거프린트 (GPU 정보 — 비교적 안정적) ────────────────────────
+// ── WebGL 핑거프린트 (GPU 정보) ──────────────────────────────────────────
 function webglFp(): string {
   try {
     const c  = document.createElement('canvas');
-    const gl = c.getContext('webgl') as WebGLRenderingContext | null
-      || c.getContext('experimental-webgl') as WebGLRenderingContext | null;
+    const gl = (c.getContext('webgl') ??
+                c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
     if (!gl) return 'no-webgl';
     const ext      = gl.getExtension('WEBGL_debug_renderer_info');
-    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
-    const vendor   = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)   : gl.getParameter(gl.VENDOR);
-    return `${vendor}|${renderer}`;
-  } catch (_) { return ''; }
+    const renderer = ext
+      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+      : String(gl.getParameter(gl.RENDERER));
+    const vendor   = ext
+      ? String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL))
+      : String(gl.getParameter(gl.VENDOR));
+    return `${vendor}||${renderer}`;
+  } catch (_) { return 'no-webgl'; }
 }
 
 // ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
@@ -87,26 +84,11 @@ function detectOS(ua: string): string {
 }
 
 function detectBrowser(ua: string): string {
-  if (/Edg\//.test(ua)) {
-    const v = (ua.match(/Edg\/([\d.]+)/) ?? [])[1]?.split('.')[0];
-    return `Microsoft Edge ${v ?? ''}`;
-  }
-  if (/OPR\/|Opera/.test(ua)) {
-    const v = (ua.match(/OPR\/([\d.]+)/) ?? [])[1]?.split('.')[0];
-    return `Opera ${v ?? ''}`;
-  }
-  if (/Chrome\//.test(ua)) {
-    const v = (ua.match(/Chrome\/([\d.]+)/) ?? [])[1]?.split('.')[0];
-    return `Chrome ${v ?? ''}`;
-  }
-  if (/Firefox\//.test(ua)) {
-    const v = (ua.match(/Firefox\/([\d.]+)/) ?? [])[1]?.split('.')[0];
-    return `Firefox ${v ?? ''}`;
-  }
-  if (/Safari\//.test(ua)) {
-    const v = (ua.match(/Version\/([\d.]+)/) ?? [])[1]?.split('.')[0];
-    return `Safari ${v ?? ''}`;
-  }
+  if (/Edg\//.test(ua))    return `Microsoft Edge ${(ua.match(/Edg\/([\d]+)/) ?? [])[1] ?? ''}`;
+  if (/OPR\//.test(ua))    return `Opera ${(ua.match(/OPR\/([\d]+)/) ?? [])[1] ?? ''}`;
+  if (/Chrome\//.test(ua)) return `Chrome ${(ua.match(/Chrome\/([\d]+)/) ?? [])[1] ?? ''}`;
+  if (/Firefox\//.test(ua)) return `Firefox ${(ua.match(/Firefox\/([\d]+)/) ?? [])[1] ?? ''}`;
+  if (/Safari\//.test(ua)) return `Safari ${(ua.match(/Version\/([\d]+)/) ?? [])[1] ?? ''}`;
   return 'Unknown Browser';
 }
 
@@ -123,13 +105,13 @@ function detectDeviceType(ua: string): string {
 
 export function collectDeviceInfo(): DeviceInfo {
   try {
-    const ua  = navigator.userAgent;
+    const ua    = navigator.userAgent;
     const touch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    const c   = document.createElement('canvas');
-    const gl  = c.getContext('webgl') as WebGLRenderingContext | null
-                || c.getContext('experimental-webgl') as WebGLRenderingContext | null;
-    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
-    const gpu = ext
+    const c     = document.createElement('canvas');
+    const gl    = (c.getContext('webgl') ??
+                   c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
+    const ext   = gl?.getExtension('WEBGL_debug_renderer_info');
+    const gpu   = ext
       ? String(gl!.getParameter(ext.UNMASKED_RENDERER_WEBGL))
       : (gl ? String(gl.getParameter(gl.RENDERER)) : 'N/A');
 
@@ -157,41 +139,39 @@ export function collectDeviceInfo(): DeviceInfo {
 
 // ── 기기 핑거프린트 생성 (메인) ─────────────────────────────────────────
 /**
- * 최초 호출 시 기기 ID를 생성하고 localStorage에 저장합니다.
- * 이후 모든 호출은 저장된 값을 그대로 반환합니다.
- * → 앱 업데이트·브라우저 업데이트·Canvas 렌더링 변화에 영향받지 않음.
+ * 하드웨어 신호 + 사용자 이름을 조합해 결정론적 기기 ID를 반환합니다.
+ *
+ * @param userName  사용자가 입력한 이름 (비어있으면 하드웨어만 사용)
+ *
+ * 동작 방식:
+ *  1) SHA256(이름 + GPU + 해상도 + CPU코어 + RAM + 타임존 + 언어 + 플랫폼)
+ *  2) 쿠키/localStorage 와 무관 — 삭제해도 같은 결과
+ *  3) 같은 사람이 같은 컴퓨터 → 항상 동일한 ID
+ *  4) localStorage 에도 캐시 저장 (성능용, 의존하지 않음)
  */
-export async function generateDeviceFingerprint(): Promise<string> {
+export async function generateDeviceFingerprint(userName = ''): Promise<string> {
   // 웹 환경이 아닌 경우 고정 폴백
-  if (typeof document === 'undefined' || typeof localStorage === 'undefined') {
+  if (typeof document === 'undefined') {
     return 'MOBL-0000-0000-0001';
   }
 
-  // ① 이미 저장된 기기 ID가 있으면 변경하지 않고 그대로 반환
-  try {
-    const saved = localStorage.getItem(LS_DEVICE_ID_KEY);
-    if (saved && /^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(saved)) {
-      return saved;
-    }
-  } catch (_) {}
+  const gpu  = webglFp();
+  const scr  = `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth ?? 0}`;
+  const cpu  = `${navigator.hardwareConcurrency ?? 0}`;
+  const ram  = `${(navigator as any).deviceMemory ?? 0}`;
+  const tz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const lang = navigator.language;
+  const plat = ((navigator as any).userAgentData?.platform ?? navigator.platform ?? '');
 
-  // ② 최초 생성: 안정적인 하드웨어 시그널 + localStorage UUID 조합
-  //    Canvas/UA 는 제외 — 브라우저·앱 업데이트 시 변하기 때문
-  const uuid    = getOrCreateLocalUUID();
-  const webgl   = webglFp();                                          // GPU (안정적)
-  const scr     = `${screen.width}x${screen.height}x${screen.colorDepth}`;  // 해상도 (안정적)
-  const hw      = `${navigator.hardwareConcurrency ?? 0}|${(navigator as any).deviceMemory ?? 0}`; // CPU·RAM
-  const tz      = Intl.DateTimeFormat().resolvedOptions().timeZone;  // 타임존 (안정적)
+  // 이름을 첫 번째로 넣어 사용자별 고유성 확보
+  const raw  = [userName.trim(), gpu, scr, cpu, ram, tz, lang, plat].join('|||');
+  const hash = await sha256(raw);
+  const h16  = hash.substring(0, 16).toUpperCase();
+  const deviceId =
+    `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
 
-  const raw     = [uuid, webgl, scr, hw, tz].join('|||');
-  const hash    = await sha256(raw);
-  const h16     = hash.substring(0, 16).toUpperCase();
-  const deviceId = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
-
-  // ③ 생성된 ID를 localStorage에 영구 저장 (이후 항상 이 값을 반환)
-  try {
-    localStorage.setItem(LS_DEVICE_ID_KEY, deviceId);
-  } catch (_) {}
+  // 성능용 캐시 (의존하지 않음 — 삭제돼도 재계산하면 같은 값)
+  try { localStorage.setItem('hicog_device_id_v3', deviceId); } catch (_) {}
 
   return deviceId;
 }
