@@ -8,15 +8,15 @@ import { EHFAMetrics, EHFFrequency, EHF_FREQUENCIES } from '../../types/screenin
  * 숨은 난청(Hidden Hearing Loss)을 감지하여 ADHD 오진을 필터링한다.
  */
 
-const TONE_DURATION_MS = 1500;
-const GRACE_MS         = 500;
-const ISI_MIN_MS       = 1200;
-const ISI_MAX_MS       = 4000;
-const CATCH_RATIO      = 0.25;
-const MAX_CATCH        = 2;
-const START_DB         = 0;
+const TONE_DURATION_MS = 800;   // 1500 → 800ms (스크리닝용 단축)
+const GRACE_MS         = 400;
+const ISI_MIN_MS       = 600;   // 1200 → 600ms
+const ISI_MAX_MS       = 1500;  // 4000 → 1500ms
+const CATCH_RATIO      = 0.15;  // 25% → 15%
+const MAX_CATCH        = 1;
+const START_DB         = 10;    // 0 → 10dB (시간 단축)
 const STEP_UP          = 10;
-const MAX_DB           = 80;
+const MAX_DB           = 60;    // 80 → 60dB (스크리닝 상한)
 
 export type EHFAEvent =
   | { type: 'frequency_start'; freq: EHFFrequency }
