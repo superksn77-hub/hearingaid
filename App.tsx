@@ -8,6 +8,9 @@ import { TestScreen }        from './src/screens/TestScreen';
 import { ResultScreen }      from './src/screens/ResultScreen';
 import { DeviceGateScreen }  from './src/screens/DeviceGateScreen';
 import { AdminScreen }       from './src/screens/AdminScreen';
+import { ScreeningCalibrationScreen } from './src/screens/screening/ScreeningCalibrationScreen';
+import { ScreeningTestScreen }        from './src/screens/screening/ScreeningTestScreen';
+import { ScreeningResultScreen }      from './src/screens/screening/ScreeningResultScreen';
 
 const Stack = createNativeStackNavigator();
 type AppPhase = 'gate' | 'admin' | 'app';
@@ -51,6 +54,9 @@ export default function App() {
         <Stack.Screen name="Calibration" component={CalibrationScreen} options={{ title: '볼륨 설정',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white' }} />
         <Stack.Screen name="Test"        component={TestScreen}        options={{ title: '검사 진행 중',    headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
         <Stack.Screen name="Result"      component={ResultScreen}      options={{ title: '검사 결과',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="ScreeningCalibration" component={ScreeningCalibrationScreen} options={{ title: '하드웨어 보정',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white' }} />
+        <Stack.Screen name="ScreeningTest"        component={ScreeningTestScreen}        options={{ title: '스크리닝 검사',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="ScreeningResult"      component={ScreeningResultScreen}      options={{ title: '스크리닝 결과',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

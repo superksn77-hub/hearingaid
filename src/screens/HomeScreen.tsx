@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Switch, Alert, TextInput,
@@ -32,32 +32,51 @@ const C = {
   errorRed:   '#d32f2f',
 };
 
+type TestMode = 'pta' | 'screening';
+
 export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
-  const [agreed, setAgreed] = useState(false);
-  const [name,   setName]   = useState('');
-  const [age,    setAge]    = useState('');
-  const [gender, setGender] = useState<UserProfile['gender']>('');
+  const [agreed, setAgreed]     = useState(false);
+  const [name,   setName]       = useState('');
+  const [age,    setAge]        = useState('');
+  const [gender, setGender]     = useState<UserProfile['gender']>('');
+  const [testMode, setTestMode] = useState<TestMode>('pta');
+  const [errorMsg, setErrorMsg] = useState('');
+  const scrollRef = useRef<ScrollView>(null);
 
   const userProfile: UserProfile = { name, age, gender };
 
-  const handleStart = () => {
+  const validateInput = (): boolean => {
     if (!name.trim()) {
-      Alert.alert('입력 필요', '이름을 입력해 주세요.');
-      return;
+      setErrorMsg('이름을 입력해 주세요.');
+      scrollRef.current?.scrollTo({ y: 320, animated: true });
+      return false;
     }
     if (!age.trim() || isNaN(Number(age)) || Number(age) <= 0) {
-      Alert.alert('입력 필요', '올바른 나이를 입력해 주세요.');
-      return;
+      setErrorMsg('올바른 나이를 입력해 주세요.');
+      scrollRef.current?.scrollTo({ y: 380, animated: true });
+      return false;
     }
     if (!gender) {
-      Alert.alert('입력 필요', '성별을 선택해 주세요.');
-      return;
+      setErrorMsg('성별을 선택해 주세요.');
+      scrollRef.current?.scrollTo({ y: 440, animated: true });
+      return false;
     }
     if (!agreed) {
-      Alert.alert('동의 필요', '면책 조항에 동의해야 검사를 시작할 수 있습니다.');
-      return;
+      setErrorMsg('면책 조항에 동의해야 검사를 시작할 수 있습니다.');
+      scrollRef.current?.scrollTo({ y: 700, animated: true });
+      return false;
     }
-    navigation.navigate('Calibration', { user: userProfile });
+    setErrorMsg('');
+    return true;
+  };
+
+  const handleStart = () => {
+    if (!validateInput()) return;
+    if (testMode === 'screening') {
+      navigation.navigate('ScreeningCalibration', { user: userProfile });
+    } else {
+      navigation.navigate('Calibration', { user: userProfile });
+    }
   };
 
   const handleDemoResult = () => {
@@ -72,7 +91,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content}>
 
       {/* ── HERO HEADER ─────────────────────────────────────────── */}
       <View style={styles.heroCard}>
@@ -207,14 +226,59 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
         </View>
       </View>
 
+      {/* ── TEST MODE SELECTOR ─────────────────────────────────── */}
+      <View style={styles.sectionCard}>
+        <View style={styles.cardHeaderRow}>
+          <View style={[styles.cardAccentBar, { backgroundColor: '#7c4dff' }]} />
+          <Text style={styles.cardTitle}>검사 유형 선택</Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.modeCard, testMode === 'pta' && styles.modeCardActive]}
+          onPress={() => setTestMode('pta')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.modeRadio}>
+            {testMode === 'pta' && <View style={styles.modeRadioDot} />}
+          </View>
+          <View style={styles.modeInfo}>
+            <Text style={[styles.modeTitle, testMode === 'pta' && styles.modeTitleActive]}>순음 청력검사</Text>
+            <Text style={styles.modeDesc}>125Hz~8kHz 표준 순음 역치 측정 (약 5~10분)</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.modeCard, testMode === 'screening' && styles.modeCardActive]}
+          onPress={() => setTestMode('screening')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.modeRadio}>
+            {testMode === 'screening' && <View style={styles.modeRadioDot} />}
+          </View>
+          <View style={styles.modeInfo}>
+            <Text style={[styles.modeTitle, testMode === 'screening' && styles.modeTitleActive]}>ADHD / 난독증 스크리닝</Text>
+            <Text style={styles.modeDesc}>주의력(CPT) + 주파수 변별(DLF) + 간격 탐지(GDT) + 확장 고주파(EHFA) (약 13분)</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── ERROR MESSAGE ─────────────────────────────────────── */}
+      {errorMsg !== '' && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{errorMsg}</Text>
+        </View>
+      )}
+
       {/* ── START BUTTON ────────────────────────────────────────── */}
       <TouchableOpacity
-        style={[styles.startButton, !agreed && styles.startButtonDisabled]}
+        style={[styles.startButton]}
         onPress={handleStart}
         activeOpacity={0.82}
       >
         <View style={styles.startButtonInner}>
-          <Text style={styles.startButtonText}>검사 시작</Text>
+          <Text style={styles.startButtonText}>
+            {testMode === 'screening' ? '스크리닝 시작' : '검사 시작'}
+          </Text>
           <Text style={styles.startButtonArrow}> →</Text>
         </View>
       </TouchableOpacity>
@@ -538,4 +602,67 @@ const styles = StyleSheet.create({
   gateButtonText: { color: '#90a4ae', fontSize: 13, fontWeight: '500' },
 
   bottomSpacer: { height: 20 },
+
+  // ── ERROR BANNER ────────────────────────────────────────────────────────
+  errorBanner: {
+    backgroundColor: 'rgba(211,47,47,0.1)',
+    borderWidth: 1,
+    borderColor: C.errorRed,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  errorBannerText: {
+    color: C.errorRed,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // ── TEST MODE SELECTOR ──────────────────────────────────────────────────
+  modeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    backgroundColor: C.inputBg,
+  },
+  modeCardActive: {
+    borderColor: C.accentBlue,
+    backgroundColor: 'rgba(30,136,229,0.06)',
+  },
+  modeRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: C.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  modeRadioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: C.accentBlue,
+  },
+  modeInfo: { flex: 1 },
+  modeTitle: {
+    color: C.textPri,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  modeTitleActive: {
+    color: C.accentBlue,
+  },
+  modeDesc: {
+    color: C.textSec,
+    fontSize: 12,
+    lineHeight: 17,
+  },
 });
