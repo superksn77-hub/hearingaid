@@ -169,8 +169,8 @@ async function saveToServer(hwHash: string, salt: string, deviceId: string): Pro
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v6';
-const COOKIE_KEY = 'hicog_fp6';
+const CACHE_KEY = 'hicog_hwfp_v7';
+const COOKIE_KEY = 'hicog_fp7';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -204,14 +204,14 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v3');
     localStorage.removeItem('hicog_hwfp_v4');
     localStorage.removeItem('hicog_hwfp_v5');
+    localStorage.removeItem('hicog_hwfp_v6');
     localStorage.removeItem('hicog_salt_v1');
   } catch {}
   try {
-    document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    document.cookie = 'hicog_fp3=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    document.cookie = 'hicog_fp4=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    document.cookie = 'hicog_fp5=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    const del = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6']) {
+      document.cookie = `${k}=; ${del}`;
+    }
   } catch {}
   try { indexedDB.deleteDatabase('hicog_device'); } catch {}
   try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
