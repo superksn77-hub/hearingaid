@@ -605,7 +605,7 @@ function buildScreeningPdfHtml(
   .btn { display:inline-block; padding:12px 36px; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.2s; }
   .btn-primary { background:linear-gradient(135deg,#6366f1,#4f46e5); color:#fff; box-shadow:0 4px 12px rgba(99,102,241,0.3); }
   .btn-primary:hover { transform:translateY(-1px); box-shadow:0 6px 16px rgba(99,102,241,0.4); }
-  @media print { .print-actions{display:none;} body{background:#fff;} .card{box-shadow:none;border:1px solid #ddd;} .header{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
+  @media print { .print-actions{display:none;} body{background:#fff;} .card{box-shadow:none;border:1px solid #ddd;} .header{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e)!important;color:#fff!important;} .header *{color:#fff!important;} .meta-item{background:rgba(255,255,255,0.15)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;} .gauge-box{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
 </style>
 </head>
 <body>
