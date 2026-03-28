@@ -54,23 +54,11 @@ function getAudioHardwareInfo(): string {
 
 // ── 하드웨어 신호 수집 (100% 브라우저 무관) ──────────────────────────────
 function collectHardwareSignals(): string {
-  // 모니터 네이티브 최대 해상도 (해상도 설정을 바꿔도 불변, 모니터 교체 시만 변경)
-  const nativeW = Math.round(screen.width * (window.devicePixelRatio ?? 1));
-  const nativeH = Math.round(screen.height * (window.devicePixelRatio ?? 1));
-
+  // 브라우저 간 100% 동일이 보장되는 신호만 사용 (서버 조회키용)
+  // 나머지 고유성은 랜덤 salt가 담당
   const signals = [
-    // CPU (하드웨어 고정)
     `${navigator.hardwareConcurrency ?? 0}`,
-    // OS 타임존
     Intl.DateTimeFormat().resolvedOptions().timeZone,
-    // 오디오 하드웨어 (사운드카드 고유)
-    getAudioHardwareInfo(),
-    // 터치 하드웨어
-    `${navigator.maxTouchPoints ?? 0}`,
-    // 색상 깊이 (GPU 고정)
-    `${screen.colorDepth}`,
-    // 모니터 네이티브 해상도 (모니터 고유, 설정 변경과 무관)
-    `${nativeW}x${nativeH}`,
   ];
 
   return signals.join('|||');
@@ -91,7 +79,7 @@ function generateSalt(): string {
 }
 
 // salt 로컬 저장/읽기 (캐시와 별도)
-const SALT_KEY = 'hicog_salt_v1';
+const SALT_KEY = 'hicog_salt_v2';
 function readLocalSalt(): string | null {
   try { return localStorage.getItem(SALT_KEY); } catch { return null; }
 }
@@ -216,6 +204,7 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v3');
     localStorage.removeItem('hicog_hwfp_v4');
     localStorage.removeItem('hicog_hwfp_v5');
+    localStorage.removeItem('hicog_salt_v1');
   } catch {}
   try {
     document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';

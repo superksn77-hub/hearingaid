@@ -22,12 +22,12 @@
  */
 
 export const FIREBASE_CONFIG = {
-  apiKey:            process.env.EXPO_PUBLIC_FB_API_KEY             ?? '',
-  authDomain:        process.env.EXPO_PUBLIC_FB_AUTH_DOMAIN         ?? '',
-  projectId:         process.env.EXPO_PUBLIC_FB_PROJECT_ID          ?? '',
-  storageBucket:     process.env.EXPO_PUBLIC_FB_STORAGE_BUCKET      ?? '',
-  messagingSenderId: process.env.EXPO_PUBLIC_FB_MESSAGING_SENDER_ID ?? '',
-  appId:             process.env.EXPO_PUBLIC_FB_APP_ID              ?? '',
+  apiKey:            process.env.EXPO_PUBLIC_FB_API_KEY             || 'AIzaSyB4WLEEmyqMIqHumu0t1N-8KQIXihwB9M',
+  authDomain:        process.env.EXPO_PUBLIC_FB_AUTH_DOMAIN         || 'hicog-hearing.firebaseapp.com',
+  projectId:         process.env.EXPO_PUBLIC_FB_PROJECT_ID          || 'hicog-hearing',
+  storageBucket:     process.env.EXPO_PUBLIC_FB_STORAGE_BUCKET      || 'hicog-hearing.firebasestorage.app',
+  messagingSenderId: process.env.EXPO_PUBLIC_FB_MESSAGING_SENDER_ID || '974786570936',
+  appId:             process.env.EXPO_PUBLIC_FB_APP_ID              || '1:974786570936:web:e4886fb8588a83f86d624d',
 };
 
 /** Firebase가 실제로 설정되어 있는지 여부 */
