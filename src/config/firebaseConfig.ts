@@ -40,4 +40,4 @@ export const IS_FIREBASE_CONFIGURED =
  * 기본값: hicog2024
  */
 export const ADMIN_PASSWORD =
-  process.env.EXPO_PUBLIC_ADMIN_KEY ?? 'hicog2024';
+  process.env.EXPO_PUBLIC_ADMIN_KEY || 'hicog2024';
