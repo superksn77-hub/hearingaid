@@ -94,7 +94,7 @@ export class CPTEngine {
         // 실제 순음
         this.emit({ type: 'tone_played' });
         const onsetTime = await this.toneGen.playShortTone(
-          TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'right'
+          TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'both'
         );
 
         const responseTime = await this.waitForResponse(RESPONSE_WINDOW);
@@ -159,7 +159,7 @@ export class CPTEngine {
 
         // 순음 재생
         this.emit({ type: 'tone_played' });
-        await this.toneGen.playShortTone(TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'right');
+        await this.toneGen.playShortTone(TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'both');
         const resp = await this.waitForResponse(RESPONSE_WINDOW);
 
         if (resp !== null) {

@@ -58,7 +58,7 @@ export class LatencyCalibrator {
       // 순음 재생
       this.listener?.({ type: 'tone_played' });
       const onsetTime = await this.toneGen.playShortTone(
-        TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'right'
+        TONE_FREQ, TONE_DURATION, TONE_AMPLITUDE, 'both'
       );
 
       // Promise 기반 응답 대기

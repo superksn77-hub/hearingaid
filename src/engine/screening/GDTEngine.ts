@@ -171,10 +171,10 @@ export class GDTEngine {
 
     if (hasGap && gapMs > 0) {
       await this.toneGen.playNoiseWithGap(
-        NOISE_DURATION, gapStart, gapMs, NOISE_AMPLITUDE, 'right'
+        NOISE_DURATION, gapStart, gapMs, NOISE_AMPLITUDE, 'both'
       );
     } else {
-      await this.toneGen.playNoise(NOISE_DURATION, NOISE_AMPLITUDE, 'right');
+      await this.toneGen.playNoise(NOISE_DURATION, NOISE_AMPLITUDE, 'both');
     }
 
     if (!this.isRunning) return false;

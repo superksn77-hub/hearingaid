@@ -1,4 +1,5 @@
 export type Ear = 'right' | 'left';
+export type EarOrBoth = Ear | 'both';
 
 export type TestFrequency = 125 | 250 | 500 | 1000 | 2000 | 4000 | 8000;
 

@@ -1,4 +1,4 @@
-import { Ear } from '../types';
+import { Ear, EarOrBoth } from '../types';
 
 /**
  * Web Audio API 기반 순음 발생기
@@ -24,7 +24,7 @@ export class ToneGenerator {
     frequencyHz: number,
     durationMs: number,
     amplitude: number,     // 0.0 ~ 1.0
-    ear: Ear = 'right'
+    ear: EarOrBoth = 'right'
   ): Promise<void> {
     this.stop();  // 동기 호출 - await 제거로 즉시 정리
 
@@ -55,7 +55,7 @@ export class ToneGenerator {
       gainNode.gain.linearRampToValueAtTime(0, now + duration);
 
       // 좌우 채널 분리
-      panner.pan.value = ear === 'right' ? 1.0 : -1.0;
+      panner.pan.value = ear === 'both' ? 0 : ear === 'right' ? 1.0 : -1.0;
 
       osc.connect(gainNode);
       gainNode.connect(panner);
@@ -99,7 +99,7 @@ export class ToneGenerator {
     frequencyHz: number,
     durationMs: number,
     amplitude: number,
-    ear: Ear = 'right'
+    ear: EarOrBoth = 'right'
   ): Promise<number> {
     this.stop();
     const onsetTime = performance.now();
@@ -125,7 +125,7 @@ export class ToneGenerator {
       gainNode.gain.setValueAtTime(amplitude, now + duration - release);
       gainNode.gain.linearRampToValueAtTime(0, now + duration);
 
-      panner.pan.value = ear === 'right' ? 1.0 : -1.0;
+      panner.pan.value = ear === 'both' ? 0 : ear === 'right' ? 1.0 : -1.0;
 
       osc.connect(gainNode);
       gainNode.connect(panner);
@@ -153,7 +153,7 @@ export class ToneGenerator {
     gapStartMs: number,
     gapDurationMs: number,
     amplitude: number,
-    ear: Ear = 'right'
+    ear: EarOrBoth = 'right'
   ): Promise<void> {
     this.stop();
 
@@ -190,7 +190,7 @@ export class ToneGenerator {
       gainNode.gain.setValueAtTime(amplitude, now + totalSec - 0.005);
       gainNode.gain.linearRampToValueAtTime(0, now + totalSec);
 
-      panner.pan.value = ear === 'right' ? 1.0 : -1.0;
+      panner.pan.value = ear === 'both' ? 0 : ear === 'right' ? 1.0 : -1.0;
 
       source.connect(gainNode);
       gainNode.connect(panner);
@@ -211,7 +211,7 @@ export class ToneGenerator {
   async playNoise(
     durationMs: number,
     amplitude: number,
-    ear: Ear = 'right'
+    ear: EarOrBoth = 'right'
   ): Promise<void> {
     this.stop();
 
@@ -240,7 +240,7 @@ export class ToneGenerator {
       gainNode.gain.setValueAtTime(amplitude, now + durSec - 0.005);
       gainNode.gain.linearRampToValueAtTime(0, now + durSec);
 
-      panner.pan.value = ear === 'right' ? 1.0 : -1.0;
+      panner.pan.value = ear === 'both' ? 0 : ear === 'right' ? 1.0 : -1.0;
 
       source.connect(gainNode);
       gainNode.connect(panner);

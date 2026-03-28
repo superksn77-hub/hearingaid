@@ -146,7 +146,7 @@ export class EHFAEngine {
 
     // 순음 재생과 응답 대기 병렬
     const responsePromise = this.waitForResponse(TONE_DURATION_MS + GRACE_MS);
-    await this.toneGen.playTone(freq, TONE_DURATION_MS, amplitude, 'right');
+    await this.toneGen.playTone(freq, TONE_DURATION_MS, amplitude, 'both');
 
     const heard = await responsePromise;
     this._phase = 'none';

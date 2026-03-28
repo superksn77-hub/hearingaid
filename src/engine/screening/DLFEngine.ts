@@ -183,7 +183,7 @@ export class DLFEngine {
     this.emit({ type: 'pair_playing', baseFreq, delta: deltaPercent });
 
     // 첫 번째 음
-    await this.toneGen.playTone(freq1, TONE_DURATION, TONE_AMPLITUDE, 'right');
+    await this.toneGen.playTone(freq1, TONE_DURATION, TONE_AMPLITUDE, 'both');
     if (!this.isRunning) return false;
 
     // 간격
@@ -191,7 +191,7 @@ export class DLFEngine {
     if (!this.isRunning) return false;
 
     // 두 번째 음
-    await this.toneGen.playTone(freq2, TONE_DURATION, TONE_AMPLITUDE, 'right');
+    await this.toneGen.playTone(freq2, TONE_DURATION, TONE_AMPLITUDE, 'both');
     if (!this.isRunning) return false;
 
     // 사용자 응답 대기 — Promise 기반
