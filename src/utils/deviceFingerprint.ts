@@ -164,7 +164,7 @@ export function collectDeviceInfo(): DeviceInfo {
  */
 const HWFP_CACHE_KEY = 'hicog_hwfp_v2'; // v2: 브라우저 무관 알고리즘
 const HWFP_COOKIE_KEY = 'hicog_fp2';
-const HWFP_IDB_STORE = 'hicog_device';
+const HWFP_IDB_STORE = 'hicog_device_v2';
 
 // ── 다중 저장소에서 읽기 (localStorage → cookie → IndexedDB) ────────
 function readFromCookie(): string | null {
@@ -233,32 +233,46 @@ function persistToAll(id: string): void {
 
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
+// ── v1 캐시 강제 정리 (브라우저별 다른 값이 저장되어 있음) ──────────
+function cleanupV1Cache(): void {
+  try { localStorage.removeItem('hicog_hwfp_v1'); } catch {}
+  try {
+    document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+  } catch {}
+  try {
+    const req = indexedDB.deleteDatabase('hicog_device');
+    req.onerror = () => {};
+  } catch {}
+}
+
 export async function generateDeviceFingerprint(): Promise<string> {
   if (typeof document === 'undefined') {
     return 'MOBL-0000-0000-0001';
   }
 
-  // ── 1단계: 3중 저장소에서 캐시 확인 ────────────────────────────────
-  // localStorage → cookie → IndexedDB 순으로 확인하여 하나라도 있으면 사용
+  // v1 잔여 캐시 제거 (한번만 실행되면 이후엔 없으므로 무해)
+  cleanupV1Cache();
+
+  // ── 1단계: v2 캐시에서 확인 ────────────────────────────────────────
   let cached: string | null = null;
 
-  // 1-a) localStorage
+  // 1-a) localStorage (v2 키)
   try {
     cached = localStorage.getItem(HWFP_CACHE_KEY);
     if (cached && FP_REGEX.test(cached)) {
-      persistToAll(cached); // 다른 저장소에도 동기화
+      persistToAll(cached);
       return cached;
     }
   } catch {}
 
-  // 1-b) Cookie
+  // 1-b) Cookie (v2 키)
   cached = readFromCookie();
   if (cached && FP_REGEX.test(cached)) {
     persistToAll(cached);
     return cached;
   }
 
-  // 1-c) IndexedDB
+  // 1-c) IndexedDB — v2는 별도 DB 이름 사용
   cached = await readFromIndexedDB();
   if (cached && FP_REGEX.test(cached)) {
     persistToAll(cached);
