@@ -54,6 +54,10 @@ function getAudioHardwareInfo(): string {
 
 // ── 하드웨어 신호 수집 (100% 브라우저 무관) ──────────────────────────────
 function collectHardwareSignals(): string {
+  // 모니터 네이티브 최대 해상도 (해상도 설정을 바꿔도 불변, 모니터 교체 시만 변경)
+  const nativeW = Math.round(screen.width * (window.devicePixelRatio ?? 1));
+  const nativeH = Math.round(screen.height * (window.devicePixelRatio ?? 1));
+
   const signals = [
     // CPU (하드웨어 고정)
     `${navigator.hardwareConcurrency ?? 0}`,
@@ -63,11 +67,11 @@ function collectHardwareSignals(): string {
     getAudioHardwareInfo(),
     // 터치 하드웨어
     `${navigator.maxTouchPoints ?? 0}`,
-    // 색상 깊이 (GPU 고정, 해상도 변경과 무관)
+    // 색상 깊이 (GPU 고정)
     `${screen.colorDepth}`,
+    // 모니터 네이티브 해상도 (모니터 고유, 설정 변경과 무관)
+    `${nativeW}x${nativeH}`,
   ];
-  // 해상도(screen.width/height), DPI 배율(devicePixelRatio) 제외
-  // → 모니터 교체, 해상도 변경, 배율 변경 시에도 번호 유지
 
   return signals.join('|||');
 }
@@ -141,8 +145,8 @@ async function saveToServer(hwKey: string, deviceId: string): Promise<void> {
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v5';
-const COOKIE_KEY = 'hicog_fp5';
+const CACHE_KEY = 'hicog_hwfp_v6';
+const COOKIE_KEY = 'hicog_fp6';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -175,12 +179,14 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v2');
     localStorage.removeItem('hicog_hwfp_v3');
     localStorage.removeItem('hicog_hwfp_v4');
+    localStorage.removeItem('hicog_hwfp_v5');
   } catch {}
   try {
     document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     document.cookie = 'hicog_fp3=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     document.cookie = 'hicog_fp4=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'hicog_fp5=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   } catch {}
   try { indexedDB.deleteDatabase('hicog_device'); } catch {}
   try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
