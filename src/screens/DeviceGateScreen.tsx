@@ -8,7 +8,7 @@ import {
   ActivityIndicator, Platform, ScrollView, TextInput,
 } from 'react-native';
 import { generateDeviceFingerprint } from '../utils/deviceFingerprint';
-import { checkDeviceStatus, registerDevice, refreshDeviceInfo, DeviceStatus, getBackendMode } from '../services/deviceLicense';
+import { checkDeviceStatus, registerDevice, refreshDeviceInfo, checkNameExists, DeviceStatus, getBackendMode } from '../services/deviceLicense';
 
 interface Props {
   onApproved:   () => void;   // 승인 완료 → 메인 앱 진입
@@ -106,7 +106,14 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     setNameError('');
     setSubmitting(true);
     try {
-      await registerDevice(deviceId, name); // deviceId는 하드웨어 기반으로 이미 확정
+      // 중복 이름 확인 (자기 자신의 기기 ID는 제외)
+      const isDuplicate = await checkNameExists(name, deviceId);
+      if (isDuplicate) {
+        setNameError('이미 사용 중인 이름입니다. 다른 이름을 사용해주세요.');
+        setSubmitting(false);
+        return;
+      }
+      await registerDevice(deviceId, name);
       setNameSubmitted(true);
     } catch (e) {
       console.error('[DeviceGate] 등록 오류:', e);

@@ -196,6 +196,34 @@ export async function getAllDevices(): Promise<DeviceRecord[]> {
   return Object.values(localRead());
 }
 
+/** 동일한 이름이 다른 기기에 이미 등록되어 있는지 확인 */
+export async function checkNameExists(
+  userName: string,
+  excludeDeviceId?: string,
+): Promise<boolean> {
+  const name = userName.trim().toLowerCase();
+  if (!name) return false;
+
+  const db = getDb();
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, 'devices'));
+      return snap.docs.some(d => {
+        if (excludeDeviceId && d.id === excludeDeviceId) return false;
+        const rec = d.data() as DeviceRecord;
+        return (rec.userName ?? '').trim().toLowerCase() === name;
+      });
+    } catch (e) {
+      console.error('[Firebase] checkNameExists 오류:', e);
+    }
+  }
+  // localStorage 폴백
+  return Object.entries(localRead()).some(([id, r]) => {
+    if (excludeDeviceId && id === excludeDeviceId) return false;
+    return (r.userName ?? '').trim().toLowerCase() === name;
+  });
+}
+
 /** 기기 상태 변경 (관리자용) */
 export async function setDeviceStatus(
   deviceId: string,

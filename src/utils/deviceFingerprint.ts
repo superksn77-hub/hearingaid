@@ -146,32 +146,49 @@ export function collectDeviceInfo(): DeviceInfo {
 
 // ── 기기 핑거프린트 생성 (메인) ─────────────────────────────────────────
 /**
- * 컴퓨터 하드웨어 신호만으로 결정론적 기기 ID를 반환합니다.
- * 사용자 이름·쿠키·localStorage 와 완전히 무관합니다.
+ * 안정적인 기기 고유 ID를 반환합니다.
  *
- * 동일한 컴퓨터라면:
- *  - 사용자가 달라도  → 같은 ID
- *  - 쿠키를 지워도   → 같은 ID
- *  - 앱을 업데이트해도 → 같은 ID
- *  - 브라우저를 업데이트해도 → 같은 ID
+ * 동작 방식 (2단계):
+ *  1) localStorage에 저장된 ID가 있으면 무조건 그 값을 반환합니다.
+ *     → 재부팅, 앱 업데이트, 브라우저 업데이트 후에도 동일한 ID 유지
+ *  2) 최초 방문(캐시 없음): 하드웨어 신호로 ID를 생성하고 localStorage에 영구 저장합니다.
+ *     → GPU + 해상도 + CPU코어 + RAM + 타임존 + 언어 + 플랫폼 → SHA-256
+ *
+ * ID가 바뀌는 유일한 경우: 브라우저 데이터를 직접 삭제한 경우
  */
+const HWFP_CACHE_KEY = 'hicog_hwfp_v1';
+
 export async function generateDeviceFingerprint(): Promise<string> {
   if (typeof document === 'undefined') {
     return 'MOBL-0000-0000-0001';
   }
 
-  const gpu  = webglFp();   // GPU 벤더 + 렌더러 + 스펙 파라미터
+  // ── 1단계: localStorage 캐시 확인 (최우선) ──────────────────────────
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const cached = localStorage.getItem(HWFP_CACHE_KEY);
+      if (cached && /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/.test(cached)) {
+        return cached; // 저장된 값이 있으면 항상 그 값 사용
+      }
+    }
+  } catch (_) {}
+
+  // ── 2단계: 최초 방문 — 하드웨어로 생성 후 localStorage에 영구 저장 ──
+  const gpu  = webglFp();
   const scr  = `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth ?? 0}`;
   const cpu  = `${navigator.hardwareConcurrency ?? 0}`;
   const ram  = `${(navigator as any).deviceMemory ?? 0}`;
   const tz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const lang = navigator.language;
-  // userAgentData.platform이 더 정확 (Win32→Windows, 아이폰→iPhone)
   const plat = ((navigator as any).userAgentData?.platform ?? navigator.platform ?? '');
 
   const raw  = [gpu, scr, cpu, ram, tz, lang, plat].join('|||');
   const hash = await sha256(raw);
   const h16  = hash.substring(0, 16).toUpperCase();
+  const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
 
-  return `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
+  // localStorage에 영구 저장 — 이후 방문에서는 항상 이 값 사용
+  try { localStorage.setItem(HWFP_CACHE_KEY, id); } catch (_) {}
+
+  return id;
 }
