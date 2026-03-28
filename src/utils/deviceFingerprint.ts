@@ -55,11 +55,7 @@ function getAudioHardwareInfo(): string {
 // ── 하드웨어 신호 수집 (100% 브라우저 무관) ──────────────────────────────
 function collectHardwareSignals(): string {
   const signals = [
-    // 모니터 하드웨어
-    `${screen.width}`,
-    `${screen.height}`,
-    `${screen.colorDepth}`,
-    // CPU
+    // CPU (하드웨어 고정)
     `${navigator.hardwareConcurrency ?? 0}`,
     // OS 타임존
     Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -67,9 +63,11 @@ function collectHardwareSignals(): string {
     getAudioHardwareInfo(),
     // 터치 하드웨어
     `${navigator.maxTouchPoints ?? 0}`,
-    // 디스플레이 배율 (OS 레벨)
-    `${Math.round((window.devicePixelRatio ?? 1) * 100)}`,
+    // 색상 깊이 (GPU 고정, 해상도 변경과 무관)
+    `${screen.colorDepth}`,
   ];
+  // 해상도(screen.width/height), DPI 배율(devicePixelRatio) 제외
+  // → 모니터 교체, 해상도 변경, 배율 변경 시에도 번호 유지
 
   return signals.join('|||');
 }
@@ -143,8 +141,8 @@ async function saveToServer(hwKey: string, deviceId: string): Promise<void> {
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v4';
-const COOKIE_KEY = 'hicog_fp4';
+const CACHE_KEY = 'hicog_hwfp_v5';
+const COOKIE_KEY = 'hicog_fp5';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -176,11 +174,13 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v1');
     localStorage.removeItem('hicog_hwfp_v2');
     localStorage.removeItem('hicog_hwfp_v3');
+    localStorage.removeItem('hicog_hwfp_v4');
   } catch {}
   try {
     document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     document.cookie = 'hicog_fp3=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'hicog_fp4=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   } catch {}
   try { indexedDB.deleteDatabase('hicog_device'); } catch {}
   try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
