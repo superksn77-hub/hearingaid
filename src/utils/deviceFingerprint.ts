@@ -76,17 +76,33 @@ function collectHardwareSignals(): string {
   return signals.join('|||');
 }
 
-// 하드웨어 해시에서 짧은 조회키 생성 (서버 매칭용)
-async function getHardwareKey(): Promise<string> {
+// 하드웨어 해시 (서버 조회용 — 동일 사양 PC는 같은 해시)
+async function getHardwareHash(): Promise<string> {
   const raw = collectHardwareSignals();
   const hash = await sha256(raw);
-  return hash.substring(0, 12); // 12자리 hex
+  return hash.substring(0, 16);
 }
 
-// ── 하드웨어 해시 → 기기번호 변환 ───────────────────────────────────────
-async function generateIdFromHardware(): Promise<string> {
-  const raw = collectHardwareSignals();
-  console.log('[FP] 하드웨어 신호:', raw);
+// ── 랜덤 salt 생성 (동일 사양 PC도 다른 번호 보장) ──────────────────────
+function generateSalt(): string {
+  const arr = new Uint8Array(8);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// salt 로컬 저장/읽기 (캐시와 별도)
+const SALT_KEY = 'hicog_salt_v1';
+function readLocalSalt(): string | null {
+  try { return localStorage.getItem(SALT_KEY); } catch { return null; }
+}
+function writeLocalSalt(salt: string): void {
+  try { localStorage.setItem(SALT_KEY, salt); } catch {}
+}
+
+// ── 하드웨어 + salt → 기기번호 ──────────────────────────────────────────
+async function generateIdFromSignals(salt: string): Promise<string> {
+  const raw = collectHardwareSignals() + '|||' + salt;
+  console.log('[FP] 기기 신호 + salt:', raw);
   const hash = await sha256(raw);
   const h16 = hash.substring(0, 16).toUpperCase();
   return `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
@@ -115,12 +131,12 @@ function getFirestoreDb(): any {
   } catch { return null; }
 }
 
-/** 서버에서 하드웨어키로 기존 기기번호 조회 */
-async function lookupFromServer(hwKey: string): Promise<string | null> {
+/** 서버에서 salt로 기존 기기번호 조회 */
+async function lookupFromServer(salt: string): Promise<string | null> {
   try {
     const fs = getFirestoreDb();
     if (!fs) return null;
-    const snap = await getDoc(doc(fs, 'device_fingerprints', hwKey));
+    const snap = await getDoc(doc(fs, 'device_salts', salt));
     if (snap.exists()) {
       return snap.data().deviceId || null;
     }
@@ -128,15 +144,35 @@ async function lookupFromServer(hwKey: string): Promise<string | null> {
   return null;
 }
 
-/** 서버에 하드웨어키 → 기기번호 저장 */
-async function saveToServer(hwKey: string, deviceId: string): Promise<void> {
+/** salt로 서버에서 salt 조회 (하드웨어 해시 기반) */
+async function lookupSaltFromServer(hwHash: string): Promise<string | null> {
+  try {
+    const fs = getFirestoreDb();
+    if (!fs) return null;
+    const snap = await getDoc(doc(fs, 'device_hw_salts', hwHash));
+    if (snap.exists()) {
+      return snap.data().salt || null;
+    }
+  } catch {}
+  return null;
+}
+
+/** 서버에 salt + 기기번호 저장 */
+async function saveToServer(hwHash: string, salt: string, deviceId: string): Promise<void> {
   try {
     const fs = getFirestoreDb();
     if (!fs) return;
-    await setDoc(doc(fs, 'device_fingerprints', hwKey), {
+    // salt → deviceId 매핑
+    await setDoc(doc(fs, 'device_salts', salt), {
+      deviceId,
+      hwHash,
+      createdAt: new Date().toISOString(),
+    });
+    // hwHash → salt 매핑 (같은 PC의 다른 브라우저에서 salt 복원용)
+    await setDoc(doc(fs, 'device_hw_salts', hwHash), {
+      salt,
       deviceId,
       createdAt: new Date().toISOString(),
-      signals: collectHardwareSignals(),
     });
   } catch {}
 }
@@ -216,20 +252,43 @@ export async function generateDeviceFingerprint(): Promise<string> {
   const cached = readLocalCache();
   if (cached) return cached;
 
-  // ── 2) Firebase 서버에서 복원 시도 ─────────────────────────────────
-  const hwKey = await getHardwareKey();
-  const serverResult = await lookupFromServer(hwKey);
-  if (serverResult && FP_REGEX.test(serverResult)) {
-    writeLocalCache(serverResult);
-    console.log('[FP] 서버에서 복원:', serverResult);
-    return serverResult;
+  const hwHash = await getHardwareHash();
+
+  // ── 2) 로컬 salt 확인 → 서버에서 deviceId 복원 ────────────────────
+  let salt = readLocalSalt();
+  if (salt) {
+    const serverResult = await lookupFromServer(salt);
+    if (serverResult && FP_REGEX.test(serverResult)) {
+      writeLocalCache(serverResult);
+      console.log('[FP] salt로 서버에서 복원:', serverResult);
+      return serverResult;
+    }
+    // salt는 있지만 서버에 없음 → salt로 재생성
+    const id = await generateIdFromSignals(salt);
+    writeLocalCache(id);
+    saveToServer(hwHash, salt, id);
+    return id;
   }
 
-  // ── 3) 새로 생성 → 로컬 + 서버 저장 ───────────────────────────────
-  const newId = await generateIdFromHardware();
+  // ── 3) 같은 PC의 다른 브라우저가 등록한 salt를 서버에서 조회 ───────
+  const serverSalt = await lookupSaltFromServer(hwHash);
+  if (serverSalt) {
+    writeLocalSalt(serverSalt);
+    const serverResult = await lookupFromServer(serverSalt);
+    if (serverResult && FP_REGEX.test(serverResult)) {
+      writeLocalCache(serverResult);
+      console.log('[FP] 다른 브라우저의 번호 복원:', serverResult);
+      return serverResult;
+    }
+  }
+
+  // ── 4) 완전 최초 방문 → salt 생성 + ID 생성 + 모두 저장 ───────────
+  salt = generateSalt();
+  writeLocalSalt(salt);
+  const newId = await generateIdFromSignals(salt);
   writeLocalCache(newId);
-  saveToServer(hwKey, newId); // fire-and-forget
-  console.log('[FP] 새로 생성:', newId);
+  saveToServer(hwHash, salt, newId);
+  console.log('[FP] 새로 생성 (salt:', salt, '):', newId);
 
   return newId;
 }
