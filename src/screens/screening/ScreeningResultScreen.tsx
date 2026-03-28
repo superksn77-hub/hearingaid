@@ -63,7 +63,7 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
 
       const available = await checkOllamaAvailable();
       if (!available) {
-        setAiError('Ollama 서버에 연결할 수 없습니다. 기본 분석을 표시합니다.');
+        setAiError('분석 서버에 연결할 수 없습니다. 기본 분석을 표시합니다.');
       }
 
       try {
@@ -293,34 +293,29 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
         </View>
       </View>
 
-      {/* ═══════ AI 종합 분석 ═══════ */}
+      {/* ═══════ 종합 분석 ═══════ */}
       <View style={[s.card, s.aiCard]}>
         <View style={s.aiHeader}>
-          <Text style={s.aiIcon}>&#129302;</Text>
-          <Text style={s.cardTitle}>AI 종합 분석 (Ollama llama3)</Text>
+          <Text style={s.cardTitle}>종합 분석 보고</Text>
         </View>
         {aiError && (
-          <Text style={s.aiErrorText}>{aiError}</Text>
+          <View style={s.aiErrorBanner}>
+            <Text style={s.aiErrorText}>{aiError}</Text>
+          </View>
         )}
         {aiLoading && !aiText ? (
           <View style={s.aiLoadingRow}>
             <ActivityIndicator size="small" color={C.accentCyan} />
-            <Text style={s.aiLoadingText}>AI 분석 생성 중...</Text>
+            <Text style={s.aiLoadingText}>분석 보고서 생성 중...</Text>
           </View>
         ) : (
-          <Text style={s.aiText}>{aiText}</Text>
+          <FormattedAnalysis text={aiText} />
         )}
         {aiLoading && aiText.length > 0 && (
           <View style={s.aiStreamingDot}>
             <Text style={s.aiStreamingText}>생성 중...</Text>
           </View>
         )}
-      </View>
-
-      {/* ═══════ 기존 임상 해석 ═══════ */}
-      <View style={s.card}>
-        <Text style={s.cardTitle}>기본 임상 해석</Text>
-        <Text style={s.interpretation}>{scores.interpretation}</Text>
       </View>
 
       {/* ═══════ 권고사항 ═══════ */}
@@ -372,6 +367,112 @@ const DetailBox: React.FC<{ label: string; value: string; desc?: string }> = ({ 
   </View>
 );
 
+/**
+ * AI/규칙 기반 분석 텍스트를 파싱하여
+ * 섹션 제목, 본문, 항목으로 구조화된 카드로 렌더링한다.
+ * Markdown 특수문자(**, ##, ---)를 제거하고 깔끔하게 표시.
+ */
+const FormattedAnalysis: React.FC<{ text: string }> = ({ text }) => {
+  if (!text) return null;
+
+  // ** 특수문자 제거, ## 제목 파싱
+  const cleaned = text
+    .replace(/\*\*/g, '')     // ** 제거
+    .replace(/\*/g, '')       // * 제거
+    .replace(/_{2,}/g, '')    // __ 제거
+    .replace(/`/g, '');       // ` 제거
+
+  const lines = cleaned.split('\n');
+  const elements: React.ReactNode[] = [];
+  let sectionIndex = 0;
+
+  const sectionColors: Record<number, string> = {
+    0: '#4fc3f7', // 요약 - 하늘
+    1: '#ff8a65', // ADHD - 주황
+    2: '#ce93d8', // 난독증 - 보라
+    3: '#4db6ac', // 청력 - 청록
+    4: '#ffd54f', // 종합 - 노랑
+    5: '#81c784', // 권고 - 초록
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line === '---') continue;
+
+    // ## 섹션 제목
+    if (line.startsWith('## ')) {
+      const title = line.replace(/^##\s*/, '');
+      const accentColor = sectionColors[sectionIndex % 6] || '#78909c';
+      sectionIndex++;
+      elements.push(
+        <View key={`h-${i}`} style={fa.sectionHeader}>
+          <View style={[fa.sectionAccent, { backgroundColor: accentColor }]} />
+          <Text style={[fa.sectionTitle, { color: accentColor }]}>{title}</Text>
+        </View>
+      );
+      continue;
+    }
+
+    // 번호 목록 (1. 2. 3. ...)
+    const numMatch = line.match(/^(\d+)\.\s*(.+)/);
+    if (numMatch) {
+      elements.push(
+        <View key={`n-${i}`} style={fa.numRow}>
+          <View style={fa.numBadge}>
+            <Text style={fa.numText}>{numMatch[1]}</Text>
+          </View>
+          <Text style={fa.itemText}>{numMatch[2]}</Text>
+        </View>
+      );
+      continue;
+    }
+
+    // 대시 목록 (- )
+    if (line.startsWith('- ')) {
+      elements.push(
+        <View key={`d-${i}`} style={fa.dashRow}>
+          <Text style={fa.dashDot}>{'  \u25B8  '}</Text>
+          <Text style={fa.itemText}>{line.slice(2)}</Text>
+        </View>
+      );
+      continue;
+    }
+
+    // 경고/면책 (⚠)
+    if (line.includes('\u26A0') || line.includes('주의사항') || line.includes('면책')) {
+      elements.push(
+        <View key={`w-${i}`} style={fa.warnBox}>
+          <Text style={fa.warnText}>{line}</Text>
+        </View>
+      );
+      continue;
+    }
+
+    // 일반 본문
+    elements.push(
+      <Text key={`p-${i}`} style={fa.paragraph}>{line}</Text>
+    );
+  }
+
+  return <View style={fa.container}>{elements}</View>;
+};
+
+const fa = StyleSheet.create({
+  container: { gap: 4 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginTop: 16, marginBottom: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  sectionAccent: { width: 4, height: 18, borderRadius: 2, marginRight: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', letterSpacing: 0.3 },
+  paragraph: { color: '#b0bec5', fontSize: 13, lineHeight: 22, marginBottom: 6 },
+  numRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, paddingLeft: 4 },
+  numBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(99,102,241,0.2)', alignItems: 'center', justifyContent: 'center', marginRight: 10, marginTop: 1 },
+  numText: { color: '#818cf8', fontSize: 11, fontWeight: '700' },
+  dashRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4, paddingLeft: 8 },
+  dashDot: { color: '#4fc3f7', fontSize: 12, marginRight: 2, marginTop: 1 },
+  itemText: { color: '#cfd8dc', fontSize: 13, lineHeight: 21, flex: 1 },
+  warnBox: { backgroundColor: 'rgba(255,152,0,0.08)', borderLeftWidth: 3, borderLeftColor: '#ff9800', borderRadius: 6, padding: 12, marginTop: 8 },
+  warnText: { color: '#ffb74d', fontSize: 12, lineHeight: 20 },
+});
+
 // ══════════════════════════════════════════════════════════════
 // ── PDF HTML 생성 ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
@@ -417,8 +518,15 @@ function buildScreeningPdfHtml(
   const ehfPct = (scores.riskEHF * 100).toFixed(1);
 
   const aiHtml = aiAnalysis
-    ? aiAnalysis.replace(/\n/g, '<br>').replace(/##\s*(.*?)(<br>|$)/g, '<h3>$1</h3>')
-    : '<p class="no-data">AI 분석 데이터 없음</p>';
+    ? aiAnalysis
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/`/g, '')
+        .replace(/\n/g, '<br>')
+        .replace(/##\s*(.*?)(<br>|$)/g, '<h3>$1</h3>')
+        .replace(/^(\d+)\.\s*/gm, '<span style="display:inline-block;width:22px;height:22px;border-radius:11px;background:#ede9fe;color:#6366f1;text-align:center;line-height:22px;font-weight:700;font-size:11px;margin-right:8px;">$1</span>')
+        .replace(/^- /gm, '<span style="color:#6366f1;margin-right:6px;">\u25B8</span>')
+    : '<p style="color:#aaa;font-style:italic;">분석 데이터 없음</p>';
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -563,7 +671,7 @@ function buildScreeningPdfHtml(
 
 <!-- AI Analysis -->
 <div class="card">
-  <div class="card-title"><span class="icon" style="background:#7c3aed">&#x1F916;</span> AI 종합 분석</div>
+  <div class="card-title"><span class="icon" style="background:#7c3aed">&#x1F4CB;</span> 종합 분석 보고</div>
   <div class="ai-box">${aiHtml}</div>
 </div>
 
@@ -656,7 +764,8 @@ const s = StyleSheet.create({
   aiIcon: { fontSize: 22, marginRight: 8 },
   aiLoadingRow: { flexDirection: 'row', alignItems: 'center', padding: 20 },
   aiLoadingText: { color: C.accentCyan, fontSize: 14, marginLeft: 12 },
-  aiErrorText: { color: '#ff9800', fontSize: 12, marginBottom: 8 },
+  aiErrorBanner: { backgroundColor: 'rgba(255,152,0,0.08)', borderRadius: 8, padding: 10, marginBottom: 8 },
+  aiErrorText: { color: '#ff9800', fontSize: 12 },
   aiText: { color: C.textMuted, fontSize: 14, lineHeight: 24 },
   aiStreamingDot: { marginTop: 8 },
   aiStreamingText: { color: C.accentPurple, fontSize: 12, fontStyle: 'italic' },

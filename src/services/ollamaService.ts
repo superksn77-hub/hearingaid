@@ -1,8 +1,7 @@
 import { ScreeningResult, ScreeningScores } from '../types/screening';
 import { UserProfile } from '../types';
 
-/**
- * Ollama AI 분석 서비스
+/** Ollama AI 분석 서비스
  *
  * localhost:11434의 llama3 모델을 사용하여
  * 스크리닝 결과에 대한 전문적 임상 해석을 생성한다.
@@ -19,8 +18,7 @@ export interface OllamaAnalysis {
   error: string | null;
 }
 
-/**
- * 스크리닝 결과를 분석하여 텍스트를 반환한다.
+/**스크리닝 결과를 분석하여 텍스트를 반환한다.
  * Ollama 연결 시 AI 분석, 미연결 시 규칙 기반 전문 분석.
  */
 export async function generateScreeningAnalysis(
@@ -46,8 +44,7 @@ export async function generateScreeningAnalysis(
   return analysis;
 }
 
-/**
- * Ollama 연결 가능 여부 확인
+/**Ollama 연결 가능 여부 확인
  */
 export async function checkOllamaAvailable(): Promise<boolean> {
   try {
