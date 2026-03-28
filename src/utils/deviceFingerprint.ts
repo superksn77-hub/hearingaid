@@ -37,36 +37,8 @@ async function sha256(text: string): Promise<string> {
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// ── WebGL 하드웨어 수치만 추출 (브라우저 무관) ───────────────────────────
-// GPU 벤더/렌더러 문자열은 브라우저마다 다를 수 있으므로 제외!
-// 숫자 파라미터만 사용 — 같은 GPU면 모든 브라우저에서 동일한 값
-function webglHardwareParams(): string {
-  try {
-    const c  = document.createElement('canvas');
-    const gl = (c.getContext('webgl') ??
-                c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
-    if (!gl) return 'no-webgl';
-
-    const params = [
-      gl.getParameter(gl.MAX_TEXTURE_SIZE),
-      gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
-      gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
-      gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
-      gl.getParameter(gl.MAX_VARYING_VECTORS),
-      gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
-      gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.[0] ?? 0,
-      gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
-      gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS),
-      gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
-      gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
-    ];
-
-    return params.join('|');
-  } catch (_) { return 'no-webgl'; }
-}
-
-// Canvas2D 제거 — 브라우저 렌더링 엔진마다 픽셀이 미세하게 다를 수 있음
-// 대신 숫자값만 사용하여 100% 브라우저 무관 보장
+// WebGL, Canvas2D 모두 제거 — 브라우저마다 다른 값을 반환함
+// OS/하드웨어 레벨 값만 사용하여 100% 브라우저 무관 보장
 
 // ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
 export interface DeviceInfo {
@@ -162,9 +134,9 @@ export function collectDeviceInfo(): DeviceInfo {
  *
  * ID가 바뀌는 유일한 경우: 브라우저 데이터를 직접 삭제한 경우
  */
-const HWFP_CACHE_KEY = 'hicog_hwfp_v2'; // v2: 브라우저 무관 알고리즘
-const HWFP_COOKIE_KEY = 'hicog_fp2';
-const HWFP_IDB_STORE = 'hicog_device_v2';
+const HWFP_CACHE_KEY = 'hicog_hwfp_v3';
+const HWFP_COOKIE_KEY = 'hicog_fp3';
+const HWFP_IDB_STORE = 'hicog_device_v3';
 
 // ── 다중 저장소에서 읽기 (localStorage → cookie → IndexedDB) ────────
 function readFromCookie(): string | null {
@@ -233,16 +205,18 @@ function persistToAll(id: string): void {
 
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
-// ── v1 캐시 강제 정리 (브라우저별 다른 값이 저장되어 있음) ──────────
-function cleanupV1Cache(): void {
-  try { localStorage.removeItem('hicog_hwfp_v1'); } catch {}
+// ── 이전 버전 캐시 모두 정리 ─────────────────────────────────────────
+function cleanupOldCaches(): void {
+  try {
+    localStorage.removeItem('hicog_hwfp_v1');
+    localStorage.removeItem('hicog_hwfp_v2');
+  } catch {}
   try {
     document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   } catch {}
-  try {
-    const req = indexedDB.deleteDatabase('hicog_device');
-    req.onerror = () => {};
-  } catch {}
+  try { indexedDB.deleteDatabase('hicog_device'); } catch {}
+  try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
 }
 
 export async function generateDeviceFingerprint(): Promise<string> {
@@ -250,8 +224,8 @@ export async function generateDeviceFingerprint(): Promise<string> {
     return 'MOBL-0000-0000-0001';
   }
 
-  // v1 잔여 캐시 제거 (한번만 실행되면 이후엔 없으므로 무해)
-  cleanupV1Cache();
+  // 이전 버전 캐시 제거
+  cleanupOldCaches();
 
   // ── 1단계: v2 캐시에서 확인 ────────────────────────────────────────
   let cached: string | null = null;
@@ -279,20 +253,23 @@ export async function generateDeviceFingerprint(): Promise<string> {
     return cached;
   }
 
-  // ── 2단계: 최초 방문 — 100% 브라우저 무관 숫자값만 사용 ─────────────
-  // 아래 값들은 Chrome/Edge/Firefox/Safari 어디서든 완전히 동일:
-  const glParams = webglHardwareParams();       // GPU 숫자 파라미터 11개
-  const scr      = `${screen.width}x${screen.height}x${screen.colorDepth}`; // 모니터
-  const cpu      = `${navigator.hardwareConcurrency ?? 0}`;                 // CPU 코어
-  const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;         // 타임존
+  // ── 2단계: 최초 방문 — OS/하드웨어 레벨 값만 사용 ───────────────────
+  // 이 값들은 Chrome/Edge/Firefox/Safari 어떤 브라우저든 100% 동일:
+  const scr = `${screen.width}x${screen.height}x${screen.colorDepth}`;
+  const cpu = `${navigator.hardwareConcurrency ?? 0}`;
+  const tz  = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const dpr = `${window.devicePixelRatio ?? 1}`;       // 디스플레이 배율 (OS 설정)
+  const touch = `${navigator.maxTouchPoints ?? 0}`;    // 터치 포인트 수 (하드웨어)
+  const availScr = `${screen.availWidth}x${screen.availHeight}`; // 작업 표시줄 제외 해상도
 
-  // 제외 목록 (브라우저마다 다를 수 있는 것들):
-  // ✗ GPU 벤더/렌더러 문자열  ✗ Canvas2D 렌더링
-  // ✗ navigator.language      ✗ navigator.platform
-  // ✗ navigator.deviceMemory  ✗ screen.pixelDepth
+  // 완전 제외 목록 (브라우저마다 다를 수 있음):
+  // ✗ WebGL 전부 (파라미터 포함)  ✗ Canvas2D
+  // ✗ navigator.language          ✗ navigator.platform
+  // ✗ navigator.deviceMemory      ✗ navigator.userAgent
+  // ✗ screen.pixelDepth
 
-  const raw  = [glParams, scr, cpu, tz].join('|||');
-  console.log('[FP] 하드웨어 신호:', raw); // 디버그용 (두 브라우저에서 비교 가능)
+  const raw = [scr, cpu, tz, dpr, touch, availScr].join('|||');
+  console.log('[FP] 기기 신호:', raw);
   const hash = await sha256(raw);
   const h16  = hash.substring(0, 16).toUpperCase();
   const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
