@@ -1,19 +1,25 @@
 /**
- * 브라우저 환경에서 기기 고유 번호(Device Fingerprint)를 생성합니다.
+ * 기기 고유 번호 (Device Fingerprint) v4
  *
- * ▸ 핵심 원칙: 컴퓨터 하드웨어 신호만으로 결정론적(deterministic) ID를 생성합니다.
- *   사용자 이름·쿠키·localStorage 와 완전히 무관합니다.
- *   같은 컴퓨터라면 누가 접속해도, 언제 접속해도 항상 동일한 ID가 나옵니다.
+ * 전략:
+ *  1) 하드웨어 신호 조합 → SHA-256 → 결정론적 ID 생성
+ *     - 같은 PC면 어떤 브라우저에서든 동일한 ID
+ *     - 다른 PC와 겹치지 않도록 충분한 신호 조합
  *
- * 구성 요소 (모두 하드웨어/시스템 고유값):
- *   WebGL GPU      – 그래픽카드 벤더·렌더러 (가장 고유하고 안정적)
- *   화면 해상도     – 가로×세로×색상깊이×픽셀깊이
- *   CPU 코어수      – navigator.hardwareConcurrency
- *   RAM 크기        – navigator.deviceMemory
- *   타임존          – Asia/Seoul 등 (OS 설정값)
- *   언어            – ko-KR 등 (OS/브라우저 설정)
- *   플랫폼          – Win32 / MacIntel / Linux x86_64
- *   WebGL 파라미터  – MAX_TEXTURE_SIZE 등 GPU 세부 스펙
+ *  2) 생성된 ID를 Firebase에 서버 백업
+ *     - 브라우저 데이터를 전부 삭제해도 서버에서 복원
+ *     - 하드웨어 해시(짧은 버전)로 서버 조회
+ *
+ *  3) 로컬 캐시는 성능 최적화용 (매번 재계산 방지)
+ *
+ * 사용하는 하드웨어 신호 (모두 브라우저 무관):
+ *   - screen.width / height / colorDepth (모니터)
+ *   - navigator.hardwareConcurrency (CPU 코어 수)
+ *   - Intl timezone (OS 타임존)
+ *   - AudioContext.sampleRate (오디오 하드웨어)
+ *   - AudioContext.destination.maxChannelCount (오디오 채널)
+ *   - navigator.maxTouchPoints (터치 하드웨어)
+ *   - window.devicePixelRatio (디스플레이 DPI)
  *
  * 결과 포맷: XXXX-XXXX-XXXX-XXXX (대문자 hex)
  */
@@ -30,17 +36,202 @@ async function sha256(text: string): Promise<string> {
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
     }
-  } catch (_) {}
-  // 폴백: djb2 해시
+  } catch {}
   let h = 5381;
   for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// WebGL, Canvas2D 모두 제거 — 브라우저마다 다른 값을 반환함
-// OS/하드웨어 레벨 값만 사용하여 100% 브라우저 무관 보장
+// ── 오디오 하드웨어 정보 (브라우저 무관) ─────────────────────────────────
+function getAudioHardwareInfo(): string {
+  try {
+    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const info = `${ac.sampleRate}|${ac.destination.maxChannelCount}`;
+    ac.close();
+    return info;
+  } catch { return '0|0'; }
+}
 
-// ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
+// ── 하드웨어 신호 수집 (100% 브라우저 무관) ──────────────────────────────
+function collectHardwareSignals(): string {
+  const signals = [
+    // 모니터 하드웨어
+    `${screen.width}`,
+    `${screen.height}`,
+    `${screen.colorDepth}`,
+    // CPU
+    `${navigator.hardwareConcurrency ?? 0}`,
+    // OS 타임존
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    // 오디오 하드웨어 (사운드카드 고유)
+    getAudioHardwareInfo(),
+    // 터치 하드웨어
+    `${navigator.maxTouchPoints ?? 0}`,
+    // 디스플레이 배율 (OS 레벨)
+    `${Math.round((window.devicePixelRatio ?? 1) * 100)}`,
+  ];
+
+  return signals.join('|||');
+}
+
+// 하드웨어 해시에서 짧은 조회키 생성 (서버 매칭용)
+async function getHardwareKey(): Promise<string> {
+  const raw = collectHardwareSignals();
+  const hash = await sha256(raw);
+  return hash.substring(0, 12); // 12자리 hex
+}
+
+// ── 하드웨어 해시 → 기기번호 변환 ───────────────────────────────────────
+async function generateIdFromHardware(): Promise<string> {
+  const raw = collectHardwareSignals();
+  console.log('[FP] 하드웨어 신호:', raw);
+  const hash = await sha256(raw);
+  const h16 = hash.substring(0, 16).toUpperCase();
+  return `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Firebase 서버 백업 (브라우저 데이터 삭제해도 복원 가능)
+// ══════════════════════════════════════════════════════════════════════════
+
+import { getApps, initializeApp } from 'firebase/app';
+import { getFirestore as getFs, doc, getDoc, setDoc } from 'firebase/firestore';
+
+let _firestore: any = null;
+
+function getFirestoreDb(): any {
+  if (_firestore) return _firestore;
+  try {
+    const apps = getApps();
+    const app = apps.length > 0 ? apps[0] : initializeApp({
+      apiKey: process.env.EXPO_PUBLIC_FB_API_KEY,
+      authDomain: process.env.EXPO_PUBLIC_FB_AUTH_DOMAIN,
+      projectId: process.env.EXPO_PUBLIC_FB_PROJECT_ID,
+    });
+    _firestore = getFs(app);
+    return _firestore;
+  } catch { return null; }
+}
+
+/** 서버에서 하드웨어키로 기존 기기번호 조회 */
+async function lookupFromServer(hwKey: string): Promise<string | null> {
+  try {
+    const fs = getFirestoreDb();
+    if (!fs) return null;
+    const snap = await getDoc(doc(fs, 'device_fingerprints', hwKey));
+    if (snap.exists()) {
+      return snap.data().deviceId || null;
+    }
+  } catch {}
+  return null;
+}
+
+/** 서버에 하드웨어키 → 기기번호 저장 */
+async function saveToServer(hwKey: string, deviceId: string): Promise<void> {
+  try {
+    const fs = getFirestoreDb();
+    if (!fs) return;
+    await setDoc(doc(fs, 'device_fingerprints', hwKey), {
+      deviceId,
+      createdAt: new Date().toISOString(),
+      signals: collectHardwareSignals(),
+    });
+  } catch {}
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 로컬 캐시 (성능 최적화용)
+// ══════════════════════════════════════════════════════════════════════════
+
+const CACHE_KEY = 'hicog_hwfp_v4';
+const COOKIE_KEY = 'hicog_fp4';
+const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
+
+function readLocalCache(): string | null {
+  // localStorage
+  try {
+    const v = localStorage.getItem(CACHE_KEY);
+    if (v && FP_REGEX.test(v)) return v;
+  } catch {}
+  // Cookie
+  try {
+    const m = document.cookie.match(new RegExp(`${COOKIE_KEY}=([A-F0-9-]{19})`));
+    if (m) return m[1];
+  } catch {}
+  return null;
+}
+
+function writeLocalCache(id: string): void {
+  try { localStorage.setItem(CACHE_KEY, id); } catch {}
+  try {
+    const exp = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${COOKIE_KEY}=${id}; expires=${exp}; path=/; SameSite=Lax`;
+  } catch {}
+  // 영구 저장 요청 (브라우저 자동 삭제 방지)
+  try { navigator.storage?.persist?.(); } catch {}
+}
+
+function cleanupOldCaches(): void {
+  try {
+    localStorage.removeItem('hicog_hwfp_v1');
+    localStorage.removeItem('hicog_hwfp_v2');
+    localStorage.removeItem('hicog_hwfp_v3');
+  } catch {}
+  try {
+    document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    document.cookie = 'hicog_fp3=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+  } catch {}
+  try { indexedDB.deleteDatabase('hicog_device'); } catch {}
+  try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
+  try { indexedDB.deleteDatabase('hicog_device_v3'); } catch {}
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 메인 함수
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 기기 고유 번호를 반환합니다.
+ *
+ * 조회 순서:
+ *  1) 로컬 캐시 (가장 빠름)
+ *  2) Firebase 서버 (하드웨어키로 조회 — 브라우저 데이터 삭제 후 복원)
+ *  3) 하드웨어 신호로 새로 생성 → 로컬 + 서버 모두 저장
+ */
+export async function generateDeviceFingerprint(): Promise<string> {
+  if (typeof document === 'undefined') {
+    return 'MOBL-0000-0000-0001';
+  }
+
+  cleanupOldCaches();
+
+  // ── 1) 로컬 캐시 확인 ──────────────────────────────────────────────
+  const cached = readLocalCache();
+  if (cached) return cached;
+
+  // ── 2) Firebase 서버에서 복원 시도 ─────────────────────────────────
+  const hwKey = await getHardwareKey();
+  const serverResult = await lookupFromServer(hwKey);
+  if (serverResult && FP_REGEX.test(serverResult)) {
+    writeLocalCache(serverResult);
+    console.log('[FP] 서버에서 복원:', serverResult);
+    return serverResult;
+  }
+
+  // ── 3) 새로 생성 → 로컬 + 서버 저장 ───────────────────────────────
+  const newId = await generateIdFromHardware();
+  writeLocalCache(newId);
+  saveToServer(hwKey, newId); // fire-and-forget
+  console.log('[FP] 새로 생성:', newId);
+
+  return newId;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 기기 정보 수집 (표시용)
+// ══════════════════════════════════════════════════════════════════════════
+
 export interface DeviceInfo {
   deviceType:   string;
   os:           string;
@@ -120,162 +311,4 @@ export function collectDeviceInfo(): DeviceInfo {
       language: '', timezone: '', touchSupport: false, userAgent: '',
     };
   }
-}
-
-// ── 기기 핑거프린트 생성 (메인) ─────────────────────────────────────────
-/**
- * 안정적인 기기 고유 ID를 반환합니다.
- *
- * 동작 방식 (2단계):
- *  1) localStorage에 저장된 ID가 있으면 무조건 그 값을 반환합니다.
- *     → 재부팅, 앱 업데이트, 브라우저 업데이트 후에도 동일한 ID 유지
- *  2) 최초 방문(캐시 없음): 하드웨어 신호로 ID를 생성하고 localStorage에 영구 저장합니다.
- *     → GPU + 해상도 + CPU코어 + RAM + 타임존 + 언어 + 플랫폼 → SHA-256
- *
- * ID가 바뀌는 유일한 경우: 브라우저 데이터를 직접 삭제한 경우
- */
-const HWFP_CACHE_KEY = 'hicog_hwfp_v3';
-const HWFP_COOKIE_KEY = 'hicog_fp3';
-const HWFP_IDB_STORE = 'hicog_device_v3';
-
-// ── 다중 저장소에서 읽기 (localStorage → cookie → IndexedDB) ────────
-function readFromCookie(): string | null {
-  try {
-    const match = document.cookie.match(new RegExp(`${HWFP_COOKIE_KEY}=([A-F0-9-]{19})`));
-    return match ? match[1] : null;
-  } catch { return null; }
-}
-
-function writeToCookie(id: string): void {
-  try {
-    // 10년짜리 쿠키 — 브라우저 데이터 삭제해도 쿠키는 남는 경우 많음
-    const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString();
-    document.cookie = `${HWFP_COOKIE_KEY}=${id}; expires=${expires}; path=/; SameSite=Lax`;
-  } catch {}
-}
-
-function readFromIndexedDB(): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open(HWFP_IDB_STORE, 1);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains('config')) {
-          db.createObjectStore('config');
-        }
-      };
-      req.onsuccess = () => {
-        try {
-          const tx = req.result.transaction('config', 'readonly');
-          const get = tx.objectStore('config').get('fingerprint');
-          get.onsuccess = () => resolve(get.result || null);
-          get.onerror = () => resolve(null);
-        } catch { resolve(null); }
-      };
-      req.onerror = () => resolve(null);
-      setTimeout(() => resolve(null), 2000); // 타임아웃
-    } catch { resolve(null); }
-  });
-}
-
-function writeToIndexedDB(id: string): void {
-  try {
-    const req = indexedDB.open(HWFP_IDB_STORE, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('config')) {
-        db.createObjectStore('config');
-      }
-    };
-    req.onsuccess = () => {
-      try {
-        const tx = req.result.transaction('config', 'readwrite');
-        tx.objectStore('config').put(id, 'fingerprint');
-      } catch {}
-    };
-  } catch {}
-}
-
-// ── 모든 저장소에 동시 저장 ──────────────────────────────────────────
-function persistToAll(id: string): void {
-  try { localStorage.setItem(HWFP_CACHE_KEY, id); } catch {}
-  writeToCookie(id);
-  writeToIndexedDB(id);
-}
-
-const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
-
-// ── 이전 버전 캐시 모두 정리 ─────────────────────────────────────────
-function cleanupOldCaches(): void {
-  try {
-    localStorage.removeItem('hicog_hwfp_v1');
-    localStorage.removeItem('hicog_hwfp_v2');
-  } catch {}
-  try {
-    document.cookie = 'hicog_fp=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    document.cookie = 'hicog_fp2=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-  } catch {}
-  try { indexedDB.deleteDatabase('hicog_device'); } catch {}
-  try { indexedDB.deleteDatabase('hicog_device_v2'); } catch {}
-}
-
-export async function generateDeviceFingerprint(): Promise<string> {
-  if (typeof document === 'undefined') {
-    return 'MOBL-0000-0000-0001';
-  }
-
-  // 이전 버전 캐시 제거
-  cleanupOldCaches();
-
-  // ── 1단계: v2 캐시에서 확인 ────────────────────────────────────────
-  let cached: string | null = null;
-
-  // 1-a) localStorage (v2 키)
-  try {
-    cached = localStorage.getItem(HWFP_CACHE_KEY);
-    if (cached && FP_REGEX.test(cached)) {
-      persistToAll(cached);
-      return cached;
-    }
-  } catch {}
-
-  // 1-b) Cookie (v2 키)
-  cached = readFromCookie();
-  if (cached && FP_REGEX.test(cached)) {
-    persistToAll(cached);
-    return cached;
-  }
-
-  // 1-c) IndexedDB — v2는 별도 DB 이름 사용
-  cached = await readFromIndexedDB();
-  if (cached && FP_REGEX.test(cached)) {
-    persistToAll(cached);
-    return cached;
-  }
-
-  // ── 2단계: 최초 방문 — OS/하드웨어 레벨 값만 사용 ───────────────────
-  // 이 값들은 Chrome/Edge/Firefox/Safari 어떤 브라우저든 100% 동일:
-  const scr = `${screen.width}x${screen.height}x${screen.colorDepth}`;
-  const cpu = `${navigator.hardwareConcurrency ?? 0}`;
-  const tz  = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const dpr = `${window.devicePixelRatio ?? 1}`;       // 디스플레이 배율 (OS 설정)
-  const touch = `${navigator.maxTouchPoints ?? 0}`;    // 터치 포인트 수 (하드웨어)
-  const availScr = `${screen.availWidth}x${screen.availHeight}`; // 작업 표시줄 제외 해상도
-
-  // 완전 제외 목록 (브라우저마다 다를 수 있음):
-  // ✗ WebGL 전부 (파라미터 포함)  ✗ Canvas2D
-  // ✗ navigator.language          ✗ navigator.platform
-  // ✗ navigator.deviceMemory      ✗ navigator.userAgent
-  // ✗ screen.pixelDepth
-
-  const raw = [scr, cpu, tz, dpr, touch, availScr].join('|||');
-  console.log('[FP] 기기 신호:', raw);
-  const hash = await sha256(raw);
-  const h16  = hash.substring(0, 16).toUpperCase();
-  const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
-
-  // 3중 영구 저장
-  persistToAll(id);
-
-  return id;
 }
