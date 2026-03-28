@@ -161,15 +161,27 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
         </View>
 
         <Text style={s.sectionLabel}>핵심 지표</Text>
-        <ZScoreBar label="RT τ (주의력 일탈)" value={result.cpt.rtTau} zScore={scores.zScores.rtTau} unit="ms" />
-        <ZScoreBar label="오경보율 (FPR)" value={result.cpt.falsePositiveRate} zScore={scores.zScores.fpr} />
-        <ZScoreBar label="누락률 (OER)" value={result.cpt.omissionRate} zScore={scores.zScores.oer} />
+        <ZScoreBar
+          label="RT τ (주의력 일탈)"
+          value={result.cpt.rtTau} zScore={scores.zScores.rtTau} unit="ms"
+          description="반응 시간 분포의 우측 꼬리 길이입니다. 값이 클수록 집중이 간헐적으로 끊기는 '주의력 일탈'이 자주 발생함을 의미합니다."
+        />
+        <ZScoreBar
+          label="오경보율 (FPR)"
+          value={result.cpt.falsePositiveRate} zScore={scores.zScores.fpr}
+          description="소리가 나지 않았는데 버튼을 누른 비율입니다. 높을수록 충동적 반응 억제 능력이 저하되어 있음을 시사합니다."
+        />
+        <ZScoreBar
+          label="누락률 (OER)"
+          value={result.cpt.omissionRate} zScore={scores.zScores.oer}
+          description="소리가 났는데 반응하지 못한 비율입니다. 높을수록 지속적 주의력 유지에 어려움이 있음을 의미합니다."
+        />
 
         <View style={s.detailGrid}>
-          <DetailBox label="평균 RT" value={`${result.cpt.rtMean}ms`} />
-          <DetailBox label="RT σ" value={`${result.cpt.rtStd}ms`} />
-          <DetailBox label="RT μ" value={`${result.cpt.rtMu}ms`} />
-          <DetailBox label="총 시행" value={`${result.cpt.totalTrials}회`} />
+          <DetailBox label="평균 RT" value={`${result.cpt.rtMean}ms`} desc="전체 반응의 평균 속도" />
+          <DetailBox label="RT σ" value={`${result.cpt.rtStd}ms`} desc="반응 시간의 흔들림 폭" />
+          <DetailBox label="RT μ" value={`${result.cpt.rtMu}ms`} desc="기본 감각-운동 처리 속도" />
+          <DetailBox label="총 시행" value={`${result.cpt.totalTrials}회`} desc="검사에 사용된 총 문항 수" />
         </View>
       </View>
 
@@ -207,11 +219,23 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
         </View>
 
         <Text style={s.sectionLabel}>주파수 변별 (DLF)</Text>
-        <ZScoreBar label="DLF 1kHz" value={result.dlf.dlf1k} zScore={scores.zScores.dlf1k} unit="%" />
-        <ZScoreBar label="DLF 6kHz" value={result.dlf.dlf6k} zScore={scores.zScores.dlf6k} unit="%" />
+        <ZScoreBar
+          label="DLF 1kHz"
+          value={result.dlf.dlf1k} zScore={scores.zScores.dlf1k} unit="%"
+          description="1kHz 기준으로 두 음의 높낮이 차이를 구별할 수 있는 최소 주파수 차이입니다. 값이 클수록 미세한 음 높이 변화를 감지하기 어렵다는 뜻입니다."
+        />
+        <ZScoreBar
+          label="DLF 6kHz"
+          value={result.dlf.dlf6k} zScore={scores.zScores.dlf6k} unit="%"
+          description="6kHz 고주파 대역의 주파수 변별력입니다. 1kHz와 함께 두 대역 모두 저하되면 전반적 감각 표상 체계 결함을 시사합니다."
+        />
 
         <Text style={s.sectionLabel}>시간 해상도 (GDT)</Text>
-        <ZScoreBar label="간격 탐지 임계치" value={result.gdt.gdt} zScore={scores.zScores.gdt} unit="ms" />
+        <ZScoreBar
+          label="간격 탐지 임계치"
+          value={result.gdt.gdt} zScore={scores.zScores.gdt} unit="ms"
+          description="소음 속 짧은 침묵(끊김)을 감지할 수 있는 최소 시간입니다. 값이 클수록 빠르게 변하는 말소리의 시간 패턴을 분절하는 능력이 저하되어 있습니다."
+        />
       </View>
 
       {/* ═══════ 계단법 수렴 차트 ═══════ */}
@@ -340,10 +364,11 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
 };
 
 // ── 보조 컴포넌트 ──
-const DetailBox: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const DetailBox: React.FC<{ label: string; value: string; desc?: string }> = ({ label, value, desc }) => (
   <View style={s.detailBox}>
     <Text style={s.detailLabel}>{label}</Text>
     <Text style={s.detailValue}>{value}</Text>
+    {desc && <Text style={s.detailDesc}>{desc}</Text>}
   </View>
 );
 
@@ -607,6 +632,7 @@ const s = StyleSheet.create({
   detailBox: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 10, minWidth: 80, flex: 1 },
   detailLabel: { color: C.textMuted, fontSize: 11, marginBottom: 2 },
   detailValue: { color: C.textWhite, fontSize: 14, fontWeight: '700' },
+  detailDesc: { color: '#78909c', fontSize: 9, marginTop: 3, lineHeight: 13 },
 
   ehfGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   ehfItem: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 12, flex: 1, minWidth: 70, alignItems: 'center' },
