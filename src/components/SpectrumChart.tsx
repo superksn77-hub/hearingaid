@@ -29,8 +29,8 @@ export const SpectrumChart: React.FC<Props> = ({
   const line30y = PAD + (1 - 0.3) * plotH;
   const line60y = PAD + (1 - 0.6) * plotH;
 
-  // 점 색상
-  const dotColor = ehfFlag ? '#ff9800' :
+  // 점 색상 — ADHD/난독증 위험도 기준으로만 결정
+  const dotColor =
     (pADHD >= 0.6 && pDyslexia >= 0.6) ? '#ff1744' :
     (pADHD >= 0.6) ? '#ff5252' :
     (pDyslexia >= 0.6) ? '#7c4dff' :
@@ -99,7 +99,15 @@ export const SpectrumChart: React.FC<Props> = ({
         <SvgText x={PAD - 6} y={line60y + 4} fill="#546e7a" fontSize="9" textAnchor="end">60%</SvgText>
         <SvgText x={PAD - 6} y={PAD + 4} fill="#546e7a" fontSize="9" textAnchor="end">100%</SvgText>
 
-        {/* 데이터 포인트 — 외부 글로우 */}
+        {/* 데이터 포인트 */}
+        {/* EHF 경고 시 주황 링 표시 */}
+        {ehfFlag && (
+          <>
+            <Circle cx={px} cy={py} r={18} fill="none" stroke="#ff9800" strokeWidth={2} strokeDasharray="4,3" opacity={0.7} />
+            <Circle cx={px} cy={py} r={22} fill="#ff9800" opacity={0.08} />
+          </>
+        )}
+        {/* 외부 글로우 */}
         <Circle cx={px} cy={py} r={14} fill={dotColor} opacity={0.2} />
         <Circle cx={px} cy={py} r={8} fill={dotColor} />
         <Circle cx={px} cy={py} r={3} fill="#ffffff" />
