@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Switch, Alert, TextInput,
+  Switch, Alert, TextInput, ActivityIndicator,
 } from 'react-native';
 import { UserProfile } from '../types';
+import { getGeminiApiKey, setGeminiApiKey, clearGeminiApiKey, testGeminiConnection, isGeminiConfigured } from '../services/geminiService';
 
 interface Props {
   navigation:  any;
@@ -262,6 +263,11 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
         </TouchableOpacity>
       </View>
 
+      {/* ── AI 분석 설정 (스크리닝 모드에서만 표시) ────────────── */}
+      {testMode === 'screening' && (
+        <GeminiApiSetup />
+      )}
+
       {/* ── ERROR MESSAGE ─────────────────────────────────────── */}
       {errorMsg !== '' && (
         <View style={styles.errorBanner}>
@@ -299,6 +305,138 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
     </ScrollView>
   );
 };
+
+// ── Gemini API 설정 컴포넌트 ──
+const GeminiApiSetup: React.FC = () => {
+  const [apiKey, setApiKeyState] = useState('');
+  const [configured, setConfigured] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const existing = getGeminiApiKey();
+    if (existing) {
+      setApiKeyState(existing);
+      setConfigured(true);
+    }
+  }, []);
+
+  const handleSave = async () => {
+    if (!apiKey.trim()) {
+      setStatusMsg('API 키를 입력해 주세요.');
+      return;
+    }
+    setGeminiApiKey(apiKey.trim());
+    setTesting(true);
+    setStatusMsg('연결 테스트 중...');
+
+    const result = await testGeminiConnection();
+    setTesting(false);
+
+    if (result.ok) {
+      setConfigured(true);
+      setStatusMsg('연결 성공! AI 분석이 활성화됩니다.');
+      setExpanded(false);
+    } else {
+      setStatusMsg(result.error || '연결 실패');
+      clearGeminiApiKey();
+      setConfigured(false);
+    }
+  };
+
+  const handleClear = () => {
+    clearGeminiApiKey();
+    setApiKeyState('');
+    setConfigured(false);
+    setStatusMsg('API 키가 삭제되었습니다.');
+  };
+
+  return (
+    <View style={geminiStyles.container}>
+      <TouchableOpacity
+        style={geminiStyles.header}
+        onPress={() => setExpanded(!expanded)}
+        activeOpacity={0.8}
+      >
+        <View style={geminiStyles.headerLeft}>
+          <View style={[geminiStyles.statusDot, { backgroundColor: configured ? '#00c853' : '#78909c' }]} />
+          <Text style={geminiStyles.headerTitle}>AI 분석 엔진</Text>
+        </View>
+        <Text style={geminiStyles.headerStatus}>
+          {configured ? '활성' : '미설정'}
+        </Text>
+        <Text style={geminiStyles.expandIcon}>{expanded ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={geminiStyles.body}>
+          <Text style={geminiStyles.desc}>
+            Google Gemini 무료 API를 설정하면 검사 결과를 AI가 상세히 분석합니다.
+            API 키가 없어도 기본 분석은 제공됩니다.
+          </Text>
+          <Text style={geminiStyles.link}>
+            무료 발급: aistudio.google.com → API 키 생성
+          </Text>
+
+          <View style={geminiStyles.inputRow}>
+            <TextInput
+              style={geminiStyles.input}
+              value={apiKey}
+              onChangeText={setApiKeyState}
+              placeholder="API 키 입력"
+              placeholderTextColor="#546e7a"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={geminiStyles.btnRow}>
+            <TouchableOpacity style={geminiStyles.saveBtn} onPress={handleSave} disabled={testing}>
+              {testing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={geminiStyles.saveBtnText}>저장 및 테스트</Text>
+              )}
+            </TouchableOpacity>
+            {configured && (
+              <TouchableOpacity style={geminiStyles.clearBtn} onPress={handleClear}>
+                <Text style={geminiStyles.clearBtnText}>삭제</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {statusMsg !== '' && (
+            <Text style={[geminiStyles.status, {
+              color: statusMsg.includes('성공') ? '#00c853' : statusMsg.includes('중') ? '#ffd740' : '#ff5252',
+            }]}>{statusMsg}</Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
+};
+
+const geminiStyles = StyleSheet.create({
+  container: { backgroundColor: 'rgba(124,77,255,0.06)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(124,77,255,0.15)', marginBottom: 16, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  headerTitle: { color: '#b0bec5', fontSize: 13, fontWeight: '600' },
+  headerStatus: { color: '#78909c', fontSize: 12, marginRight: 8 },
+  expandIcon: { color: '#546e7a', fontSize: 10 },
+  body: { paddingHorizontal: 14, paddingBottom: 14 },
+  desc: { color: '#90a4ae', fontSize: 12, lineHeight: 18, marginBottom: 8 },
+  link: { color: '#7c4dff', fontSize: 11, marginBottom: 12 },
+  inputRow: { marginBottom: 10 },
+  input: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
+  btnRow: { flexDirection: 'row', gap: 8 },
+  saveBtn: { flex: 1, backgroundColor: '#7c4dff', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  saveBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  clearBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, backgroundColor: 'rgba(255,82,82,0.15)' },
+  clearBtnText: { color: '#ff5252', fontSize: 13, fontWeight: '600' },
+  status: { fontSize: 12, marginTop: 8 },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bgLight },

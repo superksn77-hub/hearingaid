@@ -1,5 +1,6 @@
 import { ScreeningResult, ScreeningScores } from '../types/screening';
 import { UserProfile } from '../types';
+import { isGeminiConfigured, callGemini } from './geminiService';
 
 /** Ollama AI 분석 서비스
  *
@@ -27,21 +28,37 @@ export async function generateScreeningAnalysis(
   user?: UserProfile,
   onChunk?: (text: string) => void,
 ): Promise<string> {
-  // Ollama 연결 시도
-  const available = await checkOllamaAvailable();
-
-  if (available) {
+  // 1순위: Ollama 로컬 서버
+  const ollamaOk = await checkOllamaAvailable();
+  if (ollamaOk) {
     try {
       return await callOllama(result, scores, user, onChunk);
     } catch (err: any) {
-      console.warn('[Ollama] AI 분석 실패, fallback 사용:', err.message);
+      console.warn('[AI] Ollama 실패:', err.message);
     }
   }
 
-  // Ollama 미연결 또는 실패 → 규칙 기반 전문 분석
+  // 2순위: Google Gemini 무료 API
+  if (isGeminiConfigured()) {
+    try {
+      const prompt = buildPrompt(result, scores, user);
+      return await callGemini(prompt, onChunk);
+    } catch (err: any) {
+      console.warn('[AI] Gemini 실패:', err.message);
+    }
+  }
+
+  // 3순위: 규칙 기반 전문 분석
   const analysis = buildDetailedAnalysis(result, scores, user);
   onChunk?.(analysis);
   return analysis;
+}
+
+/** 현재 AI 분석 엔진 상태 확인 */
+export async function getAiEngineStatus(): Promise<'ollama' | 'gemini' | 'fallback'> {
+  if (await checkOllamaAvailable()) return 'ollama';
+  if (isGeminiConfigured()) return 'gemini';
+  return 'fallback';
 }
 
 /**Ollama 연결 가능 여부 확인

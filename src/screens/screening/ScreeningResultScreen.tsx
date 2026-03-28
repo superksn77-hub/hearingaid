@@ -10,7 +10,7 @@ import { SpectrumChart } from '../../components/SpectrumChart';
 import { ZScoreBar } from '../../components/ZScoreBar';
 import { RTDistributionChart } from '../../components/RTDistributionChart';
 import { StaircaseChart } from '../../components/StaircaseChart';
-import { generateScreeningAnalysis, checkOllamaAvailable } from '../../services/ollamaService';
+import { generateScreeningAnalysis, getAiEngineStatus } from '../../services/ollamaService';
 
 interface Props {
   navigation: any;
@@ -54,17 +54,17 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
   const [aiLoading, setAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // Ollama AI 분석 실행
+  // AI 분석 실행 (Ollama → Gemini → 규칙 기반)
+  const [aiEngine, setAiEngine] = useState<string>('');
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setAiLoading(true);
       setAiError(null);
 
-      const available = await checkOllamaAvailable();
-      if (!available) {
-        setAiError('분석 서버에 연결할 수 없습니다. 기본 분석을 표시합니다.');
-      }
+      const engine = await getAiEngineStatus();
+      setAiEngine(engine);
 
       try {
         const text = await generateScreeningAnalysis(
