@@ -65,34 +65,8 @@ function webglHardwareParams(): string {
   } catch (_) { return 'no-webgl'; }
 }
 
-// ── Canvas2D 핑거프린트 (브라우저 무관, GPU+드라이버 기반) ───────────────
-// 동일한 도형/텍스트를 그리면 같은 GPU에서 동일한 픽셀 데이터 생성
-function canvas2dFp(): string {
-  try {
-    const c = document.createElement('canvas');
-    c.width = 200; c.height = 50;
-    const ctx = c.getContext('2d');
-    if (!ctx) return 'no-canvas';
-
-    // 다양한 렌더링 조합
-    ctx.fillStyle = '#f60';
-    ctx.fillRect(0, 0, 62, 20);
-    ctx.fillStyle = '#069';
-    ctx.font = '14px Arial';
-    ctx.fillText('HiCOG!@#$', 2, 15);
-    ctx.fillStyle = 'rgba(102,204,0,0.7)';
-    ctx.fillRect(50, 5, 60, 15);
-
-    // 곡선
-    ctx.beginPath();
-    ctx.arc(80, 25, 12, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = '#a3c';
-    ctx.fill();
-
-    return c.toDataURL().slice(-60); // 끝부분 해시만 (가장 차별적)
-  } catch { return 'no-canvas'; }
-}
+// Canvas2D 제거 — 브라우저 렌더링 엔진마다 픽셀이 미세하게 다를 수 있음
+// 대신 숫자값만 사용하여 100% 브라우저 무관 보장
 
 // ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
 export interface DeviceInfo {
@@ -188,8 +162,8 @@ export function collectDeviceInfo(): DeviceInfo {
  *
  * ID가 바뀌는 유일한 경우: 브라우저 데이터를 직접 삭제한 경우
  */
-const HWFP_CACHE_KEY = 'hicog_hwfp_v1';
-const HWFP_COOKIE_KEY = 'hicog_fp';
+const HWFP_CACHE_KEY = 'hicog_hwfp_v2'; // v2: 브라우저 무관 알고리즘
+const HWFP_COOKIE_KEY = 'hicog_fp2';
 const HWFP_IDB_STORE = 'hicog_device';
 
 // ── 다중 저장소에서 읽기 (localStorage → cookie → IndexedDB) ────────
@@ -291,22 +265,20 @@ export async function generateDeviceFingerprint(): Promise<string> {
     return cached;
   }
 
-  // ── 2단계: 최초 방문 — 브라우저 무관 하드웨어 신호로 생성 ──────────
-  // 아래 값들은 Chrome/Edge/Firefox/Safari 모두 동일:
-  const glParams = webglHardwareParams();       // GPU 숫자 파라미터 (문자열 제외)
-  const canvasFp = canvas2dFp();                // Canvas2D 렌더링 결과
-  const scr      = `${screen.width}x${screen.height}x${screen.colorDepth}`; // 모니터 해상도
-  const cpu      = `${navigator.hardwareConcurrency ?? 0}`;                 // CPU 코어 수
-  const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;         // OS 타임존
+  // ── 2단계: 최초 방문 — 100% 브라우저 무관 숫자값만 사용 ─────────────
+  // 아래 값들은 Chrome/Edge/Firefox/Safari 어디서든 완전히 동일:
+  const glParams = webglHardwareParams();       // GPU 숫자 파라미터 11개
+  const scr      = `${screen.width}x${screen.height}x${screen.colorDepth}`; // 모니터
+  const cpu      = `${navigator.hardwareConcurrency ?? 0}`;                 // CPU 코어
+  const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;         // 타임존
 
-  // 제외된 값 (브라우저마다 다를 수 있음):
-  // - GPU 벤더/렌더러 문자열 (Chrome vs Firefox 다름)
-  // - navigator.language (브라우저별 설정 다름)
-  // - navigator.platform (deprecated, 브라우저별 다름)
-  // - navigator.deviceMemory (Firefox 미지원)
-  // - screen.pixelDepth (브라우저별 다름)
+  // 제외 목록 (브라우저마다 다를 수 있는 것들):
+  // ✗ GPU 벤더/렌더러 문자열  ✗ Canvas2D 렌더링
+  // ✗ navigator.language      ✗ navigator.platform
+  // ✗ navigator.deviceMemory  ✗ screen.pixelDepth
 
-  const raw  = [glParams, canvasFp, scr, cpu, tz].join('|||');
+  const raw  = [glParams, scr, cpu, tz].join('|||');
+  console.log('[FP] 하드웨어 신호:', raw); // 디버그용 (두 브라우저에서 비교 가능)
   const hash = await sha256(raw);
   const h16  = hash.substring(0, 16).toUpperCase();
   const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
