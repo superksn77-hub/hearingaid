@@ -10,7 +10,7 @@ import { UserProfile } from '../types';
  */
 
 const OLLAMA_URL = 'http://localhost:11434/api/generate';
-const MODEL = 'llama3';
+const MODEL = 'gemma3:4b';
 const TIMEOUT_MS = 60000;
 
 export interface OllamaAnalysis {
