@@ -157,23 +157,109 @@ export function collectDeviceInfo(): DeviceInfo {
  * ID가 바뀌는 유일한 경우: 브라우저 데이터를 직접 삭제한 경우
  */
 const HWFP_CACHE_KEY = 'hicog_hwfp_v1';
+const HWFP_COOKIE_KEY = 'hicog_fp';
+const HWFP_IDB_STORE = 'hicog_device';
+
+// ── 다중 저장소에서 읽기 (localStorage → cookie → IndexedDB) ────────
+function readFromCookie(): string | null {
+  try {
+    const match = document.cookie.match(new RegExp(`${HWFP_COOKIE_KEY}=([A-F0-9-]{19})`));
+    return match ? match[1] : null;
+  } catch { return null; }
+}
+
+function writeToCookie(id: string): void {
+  try {
+    // 10년짜리 쿠키 — 브라우저 데이터 삭제해도 쿠키는 남는 경우 많음
+    const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${HWFP_COOKIE_KEY}=${id}; expires=${expires}; path=/; SameSite=Lax`;
+  } catch {}
+}
+
+function readFromIndexedDB(): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(HWFP_IDB_STORE, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('config')) {
+          db.createObjectStore('config');
+        }
+      };
+      req.onsuccess = () => {
+        try {
+          const tx = req.result.transaction('config', 'readonly');
+          const get = tx.objectStore('config').get('fingerprint');
+          get.onsuccess = () => resolve(get.result || null);
+          get.onerror = () => resolve(null);
+        } catch { resolve(null); }
+      };
+      req.onerror = () => resolve(null);
+      setTimeout(() => resolve(null), 2000); // 타임아웃
+    } catch { resolve(null); }
+  });
+}
+
+function writeToIndexedDB(id: string): void {
+  try {
+    const req = indexedDB.open(HWFP_IDB_STORE, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('config')) {
+        db.createObjectStore('config');
+      }
+    };
+    req.onsuccess = () => {
+      try {
+        const tx = req.result.transaction('config', 'readwrite');
+        tx.objectStore('config').put(id, 'fingerprint');
+      } catch {}
+    };
+  } catch {}
+}
+
+// ── 모든 저장소에 동시 저장 ──────────────────────────────────────────
+function persistToAll(id: string): void {
+  try { localStorage.setItem(HWFP_CACHE_KEY, id); } catch {}
+  writeToCookie(id);
+  writeToIndexedDB(id);
+}
+
+const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 export async function generateDeviceFingerprint(): Promise<string> {
   if (typeof document === 'undefined') {
     return 'MOBL-0000-0000-0001';
   }
 
-  // ── 1단계: localStorage 캐시 확인 (최우선) ──────────────────────────
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const cached = localStorage.getItem(HWFP_CACHE_KEY);
-      if (cached && /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/.test(cached)) {
-        return cached; // 저장된 값이 있으면 항상 그 값 사용
-      }
-    }
-  } catch (_) {}
+  // ── 1단계: 3중 저장소에서 캐시 확인 ────────────────────────────────
+  // localStorage → cookie → IndexedDB 순으로 확인하여 하나라도 있으면 사용
+  let cached: string | null = null;
 
-  // ── 2단계: 최초 방문 — 하드웨어로 생성 후 localStorage에 영구 저장 ──
+  // 1-a) localStorage
+  try {
+    cached = localStorage.getItem(HWFP_CACHE_KEY);
+    if (cached && FP_REGEX.test(cached)) {
+      persistToAll(cached); // 다른 저장소에도 동기화
+      return cached;
+    }
+  } catch {}
+
+  // 1-b) Cookie
+  cached = readFromCookie();
+  if (cached && FP_REGEX.test(cached)) {
+    persistToAll(cached);
+    return cached;
+  }
+
+  // 1-c) IndexedDB
+  cached = await readFromIndexedDB();
+  if (cached && FP_REGEX.test(cached)) {
+    persistToAll(cached);
+    return cached;
+  }
+
+  // ── 2단계: 최초 방문 — 하드웨어로 생성 후 3중 영구 저장 ────────────
   const gpu  = webglFp();
   const scr  = `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth ?? 0}`;
   const cpu  = `${navigator.hardwareConcurrency ?? 0}`;
@@ -187,8 +273,8 @@ export async function generateDeviceFingerprint(): Promise<string> {
   const h16  = hash.substring(0, 16).toUpperCase();
   const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
 
-  // localStorage에 영구 저장 — 이후 방문에서는 항상 이 값 사용
-  try { localStorage.setItem(HWFP_CACHE_KEY, id); } catch (_) {}
+  // 3중 영구 저장
+  persistToAll(id);
 
   return id;
 }
