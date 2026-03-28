@@ -37,29 +37,61 @@ async function sha256(text: string): Promise<string> {
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// ── WebGL 상세 핑거프린트 ────────────────────────────────────────────────
-function webglFp(): string {
+// ── WebGL 하드웨어 수치만 추출 (브라우저 무관) ───────────────────────────
+// GPU 벤더/렌더러 문자열은 브라우저마다 다를 수 있으므로 제외!
+// 숫자 파라미터만 사용 — 같은 GPU면 모든 브라우저에서 동일한 값
+function webglHardwareParams(): string {
   try {
     const c  = document.createElement('canvas');
     const gl = (c.getContext('webgl') ??
                 c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
     if (!gl) return 'no-webgl';
 
-    const ext      = gl.getExtension('WEBGL_debug_renderer_info');
-    const renderer = ext
-      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
-      : String(gl.getParameter(gl.RENDERER));
-    const vendor   = ext
-      ? String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL))
-      : String(gl.getParameter(gl.VENDOR));
+    const params = [
+      gl.getParameter(gl.MAX_TEXTURE_SIZE),
+      gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+      gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+      gl.getParameter(gl.MAX_VERTEX_UNIFORM_VECTORS),
+      gl.getParameter(gl.MAX_VARYING_VECTORS),
+      gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+      gl.getParameter(gl.MAX_VIEWPORT_DIMS)?.[0] ?? 0,
+      gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
+      gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS),
+      gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
+      gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
+    ];
 
-    // GPU 세부 스펙 — 같은 모델이라도 드라이버 수준에서 차이 발생
-    const maxTex   = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    const maxVert  = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
-    const maxFrag  = gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS);
-
-    return `${vendor}|${renderer}|${maxTex}|${maxVert}|${maxFrag}`;
+    return params.join('|');
   } catch (_) { return 'no-webgl'; }
+}
+
+// ── Canvas2D 핑거프린트 (브라우저 무관, GPU+드라이버 기반) ───────────────
+// 동일한 도형/텍스트를 그리면 같은 GPU에서 동일한 픽셀 데이터 생성
+function canvas2dFp(): string {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 200; c.height = 50;
+    const ctx = c.getContext('2d');
+    if (!ctx) return 'no-canvas';
+
+    // 다양한 렌더링 조합
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(0, 0, 62, 20);
+    ctx.fillStyle = '#069';
+    ctx.font = '14px Arial';
+    ctx.fillText('HiCOG!@#$', 2, 15);
+    ctx.fillStyle = 'rgba(102,204,0,0.7)';
+    ctx.fillRect(50, 5, 60, 15);
+
+    // 곡선
+    ctx.beginPath();
+    ctx.arc(80, 25, 12, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = '#a3c';
+    ctx.fill();
+
+    return c.toDataURL().slice(-60); // 끝부분 해시만 (가장 차별적)
+  } catch { return 'no-canvas'; }
 }
 
 // ── 상세 기기 정보 수집 ──────────────────────────────────────────────────
@@ -259,16 +291,22 @@ export async function generateDeviceFingerprint(): Promise<string> {
     return cached;
   }
 
-  // ── 2단계: 최초 방문 — 하드웨어로 생성 후 3중 영구 저장 ────────────
-  const gpu  = webglFp();
-  const scr  = `${screen.width}x${screen.height}x${screen.colorDepth}x${screen.pixelDepth ?? 0}`;
-  const cpu  = `${navigator.hardwareConcurrency ?? 0}`;
-  const ram  = `${(navigator as any).deviceMemory ?? 0}`;
-  const tz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const lang = navigator.language;
-  const plat = ((navigator as any).userAgentData?.platform ?? navigator.platform ?? '');
+  // ── 2단계: 최초 방문 — 브라우저 무관 하드웨어 신호로 생성 ──────────
+  // 아래 값들은 Chrome/Edge/Firefox/Safari 모두 동일:
+  const glParams = webglHardwareParams();       // GPU 숫자 파라미터 (문자열 제외)
+  const canvasFp = canvas2dFp();                // Canvas2D 렌더링 결과
+  const scr      = `${screen.width}x${screen.height}x${screen.colorDepth}`; // 모니터 해상도
+  const cpu      = `${navigator.hardwareConcurrency ?? 0}`;                 // CPU 코어 수
+  const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;         // OS 타임존
 
-  const raw  = [gpu, scr, cpu, ram, tz, lang, plat].join('|||');
+  // 제외된 값 (브라우저마다 다를 수 있음):
+  // - GPU 벤더/렌더러 문자열 (Chrome vs Firefox 다름)
+  // - navigator.language (브라우저별 설정 다름)
+  // - navigator.platform (deprecated, 브라우저별 다름)
+  // - navigator.deviceMemory (Firefox 미지원)
+  // - screen.pixelDepth (브라우저별 다름)
+
+  const raw  = [glParams, canvasFp, scr, cpu, tz].join('|||');
   const hash = await sha256(raw);
   const h16  = hash.substring(0, 16).toUpperCase();
   const id   = `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
