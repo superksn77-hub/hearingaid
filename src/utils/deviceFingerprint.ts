@@ -52,45 +52,39 @@ function getAudioHardwareInfo(): string {
   } catch { return '0|0'; }
 }
 
-// ── 하드웨어 신호 수집 (100% 브라우저 무관) ──────────────────────────────
+// ── 하드웨어 신호 수집 (100% 브라우저 무관, 100% 결정론적) ───────────────
+// Firebase 불필요, 랜덤 salt 불필요 — 같은 PC = 같은 ID
 function collectHardwareSignals(): string {
-  // 브라우저 간 100% 동일이 보장되는 신호만 사용 (서버 조회키용)
-  // 나머지 고유성은 랜덤 salt가 담당
-  const signals = [
-    `${navigator.hardwareConcurrency ?? 0}`,
-    Intl.DateTimeFormat().resolvedOptions().timeZone,
-  ];
+  // 1) CPU 코어 수 (하드웨어 고정)
+  const cpu = navigator.hardwareConcurrency ?? 0;
 
-  return signals.join('|||');
+  // 2) OS 타임존
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  // 3) 오디오 하드웨어 (사운드카드 고유, 브라우저 무관)
+  let audioRate = 0;
+  let audioChannels = 0;
+  try {
+    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioRate = ac.sampleRate;
+    audioChannels = ac.destination.maxChannelCount;
+    ac.close();
+  } catch {}
+
+  // 4) 색상 깊이 (OS 디스플레이 설정, 브라우저 무관)
+  const colorDepth = screen.colorDepth;
+
+  // 5) 터치 포인트 (하드웨어 고정)
+  const touch = navigator.maxTouchPoints ?? 0;
+
+  const raw = [cpu, tz, audioRate, audioChannels, colorDepth, touch].join('|');
+  console.log('[FP] 하드웨어 신호:', raw);
+  return raw;
 }
 
-// 하드웨어 해시 (서버 조회용 — 동일 사양 PC는 같은 해시)
-async function getHardwareHash(): Promise<string> {
+// ── 하드웨어 신호 → 기기번호 (순수 결정론적) ────────────────────────────
+async function generateIdFromHardware(): Promise<string> {
   const raw = collectHardwareSignals();
-  const hash = await sha256(raw);
-  return hash.substring(0, 16);
-}
-
-// ── 랜덤 salt 생성 (동일 사양 PC도 다른 번호 보장) ──────────────────────
-function generateSalt(): string {
-  const arr = new Uint8Array(8);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// salt 로컬 저장/읽기 (캐시와 별도)
-const SALT_KEY = 'hicog_salt_v2';
-function readLocalSalt(): string | null {
-  try { return localStorage.getItem(SALT_KEY); } catch { return null; }
-}
-function writeLocalSalt(salt: string): void {
-  try { localStorage.setItem(SALT_KEY, salt); } catch {}
-}
-
-// ── 하드웨어 + salt → 기기번호 ──────────────────────────────────────────
-async function generateIdFromSignals(salt: string): Promise<string> {
-  const raw = collectHardwareSignals() + '|||' + salt;
-  console.log('[FP] 기기 신호 + salt:', raw);
   const hash = await sha256(raw);
   const h16 = hash.substring(0, 16).toUpperCase();
   return `${h16.substring(0,4)}-${h16.substring(4,8)}-${h16.substring(8,12)}-${h16.substring(12,16)}`;
@@ -100,77 +94,14 @@ async function generateIdFromSignals(salt: string): Promise<string> {
 // Firebase 서버 백업 (브라우저 데이터 삭제해도 복원 가능)
 // ══════════════════════════════════════════════════════════════════════════
 
-import { getApps, initializeApp } from 'firebase/app';
-import { getFirestore as getFs, doc, getDoc, setDoc } from 'firebase/firestore';
-
-let _firestore: any = null;
-
-function getFirestoreDb(): any {
-  if (_firestore) return _firestore;
-  try {
-    const apps = getApps();
-    const app = apps.length > 0 ? apps[0] : initializeApp({
-      apiKey: process.env.EXPO_PUBLIC_FB_API_KEY,
-      authDomain: process.env.EXPO_PUBLIC_FB_AUTH_DOMAIN,
-      projectId: process.env.EXPO_PUBLIC_FB_PROJECT_ID,
-    });
-    _firestore = getFs(app);
-    return _firestore;
-  } catch { return null; }
-}
-
-/** 서버에서 salt로 기존 기기번호 조회 */
-async function lookupFromServer(salt: string): Promise<string | null> {
-  try {
-    const fs = getFirestoreDb();
-    if (!fs) return null;
-    const snap = await getDoc(doc(fs, 'device_salts', salt));
-    if (snap.exists()) {
-      return snap.data().deviceId || null;
-    }
-  } catch {}
-  return null;
-}
-
-/** salt로 서버에서 salt 조회 (하드웨어 해시 기반) */
-async function lookupSaltFromServer(hwHash: string): Promise<string | null> {
-  try {
-    const fs = getFirestoreDb();
-    if (!fs) return null;
-    const snap = await getDoc(doc(fs, 'device_hw_salts', hwHash));
-    if (snap.exists()) {
-      return snap.data().salt || null;
-    }
-  } catch {}
-  return null;
-}
-
-/** 서버에 salt + 기기번호 저장 */
-async function saveToServer(hwHash: string, salt: string, deviceId: string): Promise<void> {
-  try {
-    const fs = getFirestoreDb();
-    if (!fs) return;
-    // salt → deviceId 매핑
-    await setDoc(doc(fs, 'device_salts', salt), {
-      deviceId,
-      hwHash,
-      createdAt: new Date().toISOString(),
-    });
-    // hwHash → salt 매핑 (같은 PC의 다른 브라우저에서 salt 복원용)
-    await setDoc(doc(fs, 'device_hw_salts', hwHash), {
-      salt,
-      deviceId,
-      createdAt: new Date().toISOString(),
-    });
-  } catch {}
-}
+// Firebase 불필요 — 순수 하드웨어 결정론적 방식
 
 // ══════════════════════════════════════════════════════════════════════════
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v7';
-const COOKIE_KEY = 'hicog_fp7';
+const CACHE_KEY = 'hicog_hwfp_v8';
+const COOKIE_KEY = 'hicog_fp8';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -205,11 +136,13 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v4');
     localStorage.removeItem('hicog_hwfp_v5');
     localStorage.removeItem('hicog_hwfp_v6');
+    localStorage.removeItem('hicog_hwfp_v7');
     localStorage.removeItem('hicog_salt_v1');
+    localStorage.removeItem('hicog_salt_v2');
   } catch {}
   try {
     const del = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6']) {
+    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6','hicog_fp7']) {
       document.cookie = `${k}=; ${del}`;
     }
   } catch {}
@@ -237,49 +170,17 @@ export async function generateDeviceFingerprint(): Promise<string> {
 
   cleanupOldCaches();
 
-  // ── 1) 로컬 캐시 확인 ──────────────────────────────────────────────
+  // ── 1) 로컬 캐시 확인 (성능용) ────────────────────────────────────
   const cached = readLocalCache();
   if (cached) return cached;
 
-  const hwHash = await getHardwareHash();
+  // ── 2) 하드웨어 신호로 결정론적 생성 ──────────────────────────────
+  // 같은 PC면 어떤 브라우저에서든 항상 동일한 결과
+  const id = await generateIdFromHardware();
+  writeLocalCache(id);
+  console.log('[FP] 생성 완료:', id);
 
-  // ── 2) 로컬 salt 확인 → 서버에서 deviceId 복원 ────────────────────
-  let salt = readLocalSalt();
-  if (salt) {
-    const serverResult = await lookupFromServer(salt);
-    if (serverResult && FP_REGEX.test(serverResult)) {
-      writeLocalCache(serverResult);
-      console.log('[FP] salt로 서버에서 복원:', serverResult);
-      return serverResult;
-    }
-    // salt는 있지만 서버에 없음 → salt로 재생성
-    const id = await generateIdFromSignals(salt);
-    writeLocalCache(id);
-    saveToServer(hwHash, salt, id);
-    return id;
-  }
-
-  // ── 3) 같은 PC의 다른 브라우저가 등록한 salt를 서버에서 조회 ───────
-  const serverSalt = await lookupSaltFromServer(hwHash);
-  if (serverSalt) {
-    writeLocalSalt(serverSalt);
-    const serverResult = await lookupFromServer(serverSalt);
-    if (serverResult && FP_REGEX.test(serverResult)) {
-      writeLocalCache(serverResult);
-      console.log('[FP] 다른 브라우저의 번호 복원:', serverResult);
-      return serverResult;
-    }
-  }
-
-  // ── 4) 완전 최초 방문 → salt 생성 + ID 생성 + 모두 저장 ───────────
-  salt = generateSalt();
-  writeLocalSalt(salt);
-  const newId = await generateIdFromSignals(salt);
-  writeLocalCache(newId);
-  saveToServer(hwHash, salt, newId);
-  console.log('[FP] 새로 생성 (salt:', salt, '):', newId);
-
-  return newId;
+  return id;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
