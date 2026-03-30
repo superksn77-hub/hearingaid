@@ -1037,21 +1037,41 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
     }
 
     const html = buildPrintHtml(result);
-    const ua = navigator.userAgent;
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
 
-    // ── 방법 1: 동기적 window.open (팝업 차단 우회) ────────────────
-    // 클릭 핸들러 내에서 즉시 호출하므로 모바일에서도 허용됨
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
-      win.focus();
+    // 방법 1: Blob URL → 새 탭 (팝업 차단 우회)
+    try {
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+      const win = window.open(blobUrl, '_blank');
+      if (win) {
+        // Blob URL은 자동 revoke하면 탭이 빈 페이지가 되므로 지연
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        return;
+      }
+      URL.revokeObjectURL(blobUrl);
+    } catch {}
+
+    // 방법 2: 같은 탭에 iframe 삽입 → 인쇄
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;border:none;background:white;';
+      document.body.appendChild(iframe);
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(html);
+        iframeDoc.close();
+        // 닫기 버튼 추가
+        const closeBtn = iframeDoc.createElement('button');
+        closeBtn.textContent = '✕ 닫기';
+        closeBtn.style.cssText = 'position:fixed;top:10px;right:10px;z-index:100000;padding:8px 16px;background:#e53935;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer;';
+        closeBtn.onclick = () => document.body.removeChild(iframe);
+        iframeDoc.body.appendChild(closeBtn);
+      }
       return;
-    }
+    } catch {}
 
-    // ── 방법 2: 팝업 차단된 경우 → 파일 다운로드 폴백 ─────────────
+    // 방법 3: HTML 파일 다운로드
     try {
       const dateStr = new Date().toLocaleDateString('ko-KR')
         .replace(/\.\s*/g, '-').replace(/-$/, '');
@@ -1064,11 +1084,8 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
-
-      if (isMobile) {
-        alert('파일이 다운로드되었습니다.\n다운로드된 파일을 열고 브라우저 공유 메뉴에서 "인쇄"를 선택하면 PDF로 저장할 수 있습니다.');
-      }
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      alert('HTML 파일이 다운로드되었습니다.\n파일을 열고 Ctrl+P를 눌러 PDF로 저장하세요.');
     } catch (e) {
       alert('저장에 실패했습니다.\n브라우저 설정에서 팝업 차단을 해제해 주세요.');
     }
