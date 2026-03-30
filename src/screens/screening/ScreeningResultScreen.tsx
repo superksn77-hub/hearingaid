@@ -558,24 +558,28 @@ function spectrumSvg(adhdPct: number, dysPct: number, ehfFlag: boolean): string 
 
 function parseAiToHtml(raw: string): string {
   if (!raw) return '<p class="no-data">분석 데이터 없음</p>';
-  const lines = raw.replace(/\*\*/g, '').replace(/\*/g, '').replace(/`/g, '').split('\n');
+
+  // ** bold ** → <strong>
+  const boldified = raw.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  const lines = boldified.replace(/`/g, '').split('\n');
   let html = '';
   let inList = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) { if (inList) { html += '</ul>'; inList = false; } html += '<div style="height:8px"></div>'; continue; }
+    if (!trimmed) { if (inList) { html += '</ul>'; inList = false; } html += '<div style="height:10px"></div>'; continue; }
+    if (trimmed === '---') { html += '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">'; continue; }
     if (/^##\s*/.test(trimmed)) {
       if (inList) { html += '</ul>'; inList = false; }
       const title = trimmed.replace(/^##\s*/, '');
       html += `<div class="ai-section-title">${title}</div>`;
     } else if (/^\d+[\.\)]\s/.test(trimmed)) {
-      if (!inList) { html += '<ul class="ai-list">'; inList = true; }
+      if (!inList) { html += '<ol class="ai-list-ol">'; inList = true; }
       html += `<li class="ai-list-num">${trimmed.replace(/^\d+[\.\)]\s*/, '')}</li>`;
     } else if (/^[-\u25B8\u2022]\s/.test(trimmed)) {
       if (!inList) { html += '<ul class="ai-list">'; inList = true; }
       html += `<li class="ai-list-dash">${trimmed.replace(/^[-\u25B8\u2022]\s*/, '')}</li>`;
     } else {
-      if (inList) { html += '</ul>'; inList = false; }
+      if (inList) { html += inList ? '</ul>' : '</ol>'; inList = false; }
       html += `<p class="ai-para">${trimmed}</p>`;
     }
   }
