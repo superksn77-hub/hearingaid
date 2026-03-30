@@ -589,10 +589,11 @@ function buildScreeningPdfHtml(
   user?: UserProfile,
   aiAnalysis?: string,
 ): string {
-  const date = new Date(result.date).toLocaleDateString('ko-KR');
-  const name = user?.name || '미지정';
-  const age = user?.age || '-';
-  const gender = user?.gender === 'male' ? '남성' : user?.gender === 'female' ? '여성' : '기타';
+  const date = new Date(result.date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const name = (user?.name && user.name.trim()) ? user.name.trim() : '미지정';
+  const age = (user?.age && user.age.trim()) ? user.age.trim() : '-';
+  const gender = user?.gender === 'male' ? '남성' : user?.gender === 'female' ? '여성' : user?.gender === 'other' ? '기타' : '-';
+  console.log('[PDF] user 객체:', JSON.stringify(user), '→ name:', name, 'age:', age, 'gender:', gender);
   const adhdPct = scores.pADHD * 100;
   const dysPct = scores.pDyslexia * 100;
   const ehfPct = scores.riskEHF * 100;
