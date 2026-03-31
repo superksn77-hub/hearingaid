@@ -28,9 +28,9 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     rtTau:  { mean: 150, std: 50 },
     fpr:    { mean: 0.08, std: 0.06 },
     oer:    { mean: 0.05, std: 0.04 },
-    dlf1k:  { mean: 2.5, std: 1.0 },
-    dlf6k:  { mean: 1.5, std: 0.8 },
-    gdt:    { mean: 6.0, std: 2.0 },
+    dlf1k:  { mean: 2.5, std: 1.3 },   // std 1.0→1.3
+    dlf6k:  { mean: 1.5, std: 1.0 },   // std 0.8→1.0
+    gdt:    { mean: 6.0, std: 2.5 },   // std 2.0→2.5
     rtMean: { mean: 380, std: 60 },
     ptaEHF: { mean: 3, std: 6 },
   },
@@ -38,9 +38,9 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     rtTau:  { mean: 120, std: 40 },
     fpr:    { mean: 0.05, std: 0.04 },
     oer:    { mean: 0.03, std: 0.03 },
-    dlf1k:  { mean: 1.5, std: 0.8 },
-    dlf6k:  { mean: 1.0, std: 0.5 },
-    gdt:    { mean: 4.5, std: 1.5 },
+    dlf1k:  { mean: 1.5, std: 1.2 },   // std 0.8→1.2 (Z점수 과장 방지)
+    dlf6k:  { mean: 1.0, std: 0.8 },   // std 0.5→0.8
+    gdt:    { mean: 4.5, std: 2.0 },   // std 1.5→2.0
     rtMean: { mean: 320, std: 50 },
     ptaEHF: { mean: 2, std: 5 },
   },
@@ -48,8 +48,8 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     rtTau:  { mean: 140, std: 45 },
     fpr:    { mean: 0.06, std: 0.05 },
     oer:    { mean: 0.04, std: 0.03 },
-    dlf1k:  { mean: 2.0, std: 1.0 },
-    dlf6k:  { mean: 1.2, std: 0.6 },
+    dlf1k:  { mean: 2.0, std: 1.2 },   // std 1.0→1.2
+    dlf6k:  { mean: 1.2, std: 0.8 },   // std 0.6→0.8
     gdt:    { mean: 5.5, std: 2.0 },
     rtMean: { mean: 350, std: 55 },
     ptaEHF: { mean: 8, std: 8 },
@@ -77,13 +77,15 @@ const BETA_ADHD = {
   gdt: -0.3,
 };
 
-// 난독증: DLF_1k, DLF_6k, GDT에 양의 가중치; RT_mean 보조
+// 난독증: DLF, GDT에 양의 가중치 + rtTau 보상 음수 가중치
+// intercept -4.0 (보수적), 가중치 축소 → 100% 포화 방지
 const ALPHA_DYS = {
-  intercept: -3.0,
-  dlf1k: 1.1,
-  dlf6k: 1.0,
-  gdt: 0.9,
-  rtMean: 0.5,
+  intercept: -4.0,
+  dlf1k: 0.85,
+  dlf6k: 0.75,
+  gdt: 0.7,
+  rtMean: 0.3,
+  rtTau: -0.25,  // 주의력 일탈 크면 → ADHD 가능성 ↑, 난독증 점수 ↓
 };
 
 // EHF 필터
@@ -124,12 +126,13 @@ export function scoreScreening(result: ScreeningResult, ageStr?: string): Screen
   // EHF 감쇠: 숨은 난청 시 ADHD 확률 하향
   if (ehfFlag) pADHD *= (1 - riskEHF * 0.5);
 
-  // P_DYS
+  // P_DYS (보수적: intercept -4.0, 가중치 축소, rtTau 보상)
   const logitDYS = ALPHA_DYS.intercept
     + ALPHA_DYS.dlf1k * z.dlf1k
     + ALPHA_DYS.dlf6k * z.dlf6k
     + ALPHA_DYS.gdt * z.gdt
-    + ALPHA_DYS.rtMean * z.rtMean;
+    + ALPHA_DYS.rtMean * z.rtMean
+    + ALPHA_DYS.rtTau * z.rtTau;
   const pDyslexia = sigmoid(logitDYS);
 
   // 위험 수준 분류
