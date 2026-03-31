@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Platform
 } from 'react-native';
 import { Audiogram } from '../components/Audiogram';
 import { TestResult, FREQUENCY_ORDER, TestFrequency } from '../types';
+import { saveTestHistory, generateTestId } from '../services/testHistoryService';
+import { generateDeviceFingerprint } from '../utils/deviceFingerprint';
 
 interface Props {
   navigation: any;
@@ -1029,6 +1031,35 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const healthRisks  = analyzeHealthRisks(result, result.user?.age, result.user?.gender);
   const audioPattern = analyzeAudiogramPattern(result, result.user?.age, result.user?.gender);
+
+  // 검사 이력 저장 (최초 1회)
+  const savedRef = useRef(false);
+  useEffect(() => {
+    if (savedRef.current) return;
+    savedRef.current = true;
+    (async () => {
+      try {
+        const deviceId = await generateDeviceFingerprint();
+        const hearingLevel = rightClass && leftClass
+          ? (rightClass.label === leftClass.label ? rightClass.label : `좌:${leftClass.label} / 우:${rightClass.label}`)
+          : '측정 불가';
+        await saveTestHistory({
+          id: generateTestId(),
+          deviceId,
+          userName: result.user?.name || '미지정',
+          testType: 'pta',
+          date: new Date().toISOString(),
+          ptaSummary: {
+            leftAvg: leftPTA ?? 0,
+            rightAvg: rightPTA ?? 0,
+            hearingLevel,
+          },
+        });
+      } catch (e) {
+        console.warn('[TestHistory] PTA 저장 실패:', e);
+      }
+    })();
+  }, []);
 
   const handleExportPdf = () => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') {

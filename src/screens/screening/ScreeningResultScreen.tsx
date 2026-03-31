@@ -11,6 +11,8 @@ import { ZScoreBar } from '../../components/ZScoreBar';
 import { RTDistributionChart } from '../../components/RTDistributionChart';
 import { StaircaseChart } from '../../components/StaircaseChart';
 import { generateScreeningAnalysis, getAiEngineStatus } from '../../services/ollamaService';
+import { saveTestHistory, generateTestId } from '../../services/testHistoryService';
+import { generateDeviceFingerprint } from '../../utils/deviceFingerprint';
 
 interface Props {
   navigation: any;
@@ -83,6 +85,39 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // 검사 이력 저장 (최초 1회)
+  useEffect(() => {
+    let done = false;
+    (async () => {
+      if (done) return;
+      done = true;
+      try {
+        const deviceId = await generateDeviceFingerprint();
+        await saveTestHistory({
+          id: generateTestId(),
+          deviceId,
+          userName: user?.name || '미지정',
+          testType: 'screening',
+          date: result.date || new Date().toISOString(),
+          screeningSummary: {
+            adhdPct: scores.pADHD * 100,
+            dyslexiaPct: scores.pDyslexia * 100,
+            adhdLevel: scores.adhdLevel,
+            dyslexiaLevel: scores.dyslexiaLevel,
+            ehfFlag: scores.ehfFlag,
+            rtTau: result.cpt.rtTau,
+            dlf1k: result.dlf.dlf1k,
+            dlf6k: result.dlf.dlf6k,
+            gdt: result.gdt.gdt,
+            ptaEHF: result.ehfa.ptaEHF,
+          },
+        });
+      } catch (e) {
+        console.warn('[TestHistory] 스크리닝 저장 실패:', e);
+      }
+    })();
   }, []);
 
   const adhdStyle = LEVEL_STYLE[scores.adhdLevel];

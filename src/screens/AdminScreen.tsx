@@ -11,6 +11,7 @@ import {
   DeviceRecord, DeviceStatus, getBackendMode,
 } from '../services/deviceLicense';
 import { ADMIN_PASSWORD, IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
+import { getAllTestHistory, deleteTestHistory, TestHistoryRecord } from '../services/testHistoryService';
 
 interface Props {
   onClose: () => void;
@@ -61,6 +62,8 @@ const SEARCH_FIELD_LABELS: Record<SearchField, string> = {
   browser:    '브라우저',
 };
 
+type AdminTab = 'devices' | 'history';
+
 export const AdminScreen: React.FC<Props> = ({ onClose }) => {
   const [phase,       setPhase]       = useState<'login' | 'panel'>('login');
   const [pw,          setPw]          = useState('');
@@ -71,11 +74,41 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState<SearchField>('all');
 
+  // 탭 상태
+  const [activeTab, setActiveTab] = useState<AdminTab>('devices');
+
+  // 검사 이력 상태
+  const [testHistory, setTestHistory] = useState<TestHistoryRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'pta' | 'screening'>('all');
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const list = await getAllTestHistory();
+      list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setTestHistory(list);
+    } catch (e) {
+      console.error('[History]', e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const handleDeleteHistory = async (id: string) => {
+    if (Platform.OS === 'web') {
+      if (!window.confirm('이 검사 기록을 삭제하시겠습니까?')) return;
+    }
+    await deleteTestHistory(id);
+    setTestHistory(prev => prev.filter(r => r.id !== id));
+  };
+
   const handleLogin = () => {
     if (pw === ADMIN_PASSWORD) {
       setPwError('');
       setPhase('panel');
       loadDevices();
+      loadHistory();
     } else {
       setPwError('비밀번호가 올바르지 않습니다.');
       setPw('');
@@ -213,7 +246,7 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           </View>
         </View>
         <View style={styles.topBarRight}>
-          <TouchableOpacity style={styles.refreshBtn} onPress={loadDevices}>
+          <TouchableOpacity style={styles.refreshBtn} onPress={() => { loadDevices(); loadHistory(); }}>
             <Text style={styles.refreshBtnText}>↻ 새로고침</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
@@ -221,6 +254,174 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* ── 탭 전환 ── */}
+      <View style={{ flexDirection: 'row', marginBottom: 16, gap: 8 }}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'devices' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('devices')}
+        >
+          <Text style={[styles.tabBtnText, activeTab === 'devices' && styles.tabBtnTextActive]}>
+            🖥 기기 관리 ({devices.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'history' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('history')}
+        >
+          <Text style={[styles.tabBtnText, activeTab === 'history' && styles.tabBtnTextActive]}>
+            📊 검사 이력 ({testHistory.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ══════ 검사 이력 탭 ══════ */}
+      {activeTab === 'history' && (
+        <View>
+          {/* 필터 */}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            {(['all', 'pta', 'screening'] as const).map(f => (
+              <TouchableOpacity
+                key={f}
+                style={[styles.statCard, historyFilter === f && styles.statCardActive, { flex: 1 }]}
+                onPress={() => setHistoryFilter(f)}
+              >
+                <Text style={[styles.statNum, { fontSize: 18 }]}>
+                  {f === 'all' ? testHistory.length
+                    : testHistory.filter(r => r.testType === f).length}
+                </Text>
+                <Text style={styles.statLabel}>
+                  {f === 'all' ? '전체' : f === 'pta' ? '순음검사' : '스크리닝'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {historyLoading && <ActivityIndicator color={C.cyan} style={{ marginVertical: 20 }} />}
+
+          {!historyLoading && testHistory
+            .filter(r => historyFilter === 'all' || r.testType === historyFilter)
+            .map(record => {
+              const d = new Date(record.date);
+              const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+
+              return (
+                <View key={record.id} style={[styles.deviceCard, { borderLeftWidth: 3, borderLeftColor: record.testType === 'pta' ? C.cyan : '#7c4dff' }]}>
+                  {/* 헤더 */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={[styles.statusBadge, {
+                        backgroundColor: record.testType === 'pta' ? 'rgba(0,184,212,0.15)' : 'rgba(124,77,255,0.15)',
+                      }]}>
+                        <Text style={[styles.statusBadgeText, {
+                          color: record.testType === 'pta' ? C.cyan : '#7c4dff',
+                        }]}>
+                          {record.testType === 'pta' ? '순음 청력검사' : 'ADHD/난독증 스크리닝'}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => handleDeleteHistory(record.id)}>
+                      <Text style={{ color: C.red, fontSize: 12 }}>삭제</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 사용자 정보 */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ color: C.white, fontSize: 14, fontWeight: '600' }}>
+                      {record.userName}
+                    </Text>
+                    <Text style={{ color: C.muted, fontSize: 11 }}>{dateStr}</Text>
+                  </View>
+
+                  <Text style={{ color: C.muted, fontSize: 10, marginBottom: 8 }}>
+                    기기: {record.deviceId}
+                  </Text>
+
+                  {/* PTA 결과 */}
+                  {record.ptaSummary && (
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <View style={styles.histMetric}>
+                        <Text style={styles.histMetricLabel}>좌측 평균</Text>
+                        <Text style={styles.histMetricValue}>{record.ptaSummary.leftAvg.toFixed(0)} dB</Text>
+                      </View>
+                      <View style={styles.histMetric}>
+                        <Text style={styles.histMetricLabel}>우측 평균</Text>
+                        <Text style={styles.histMetricValue}>{record.ptaSummary.rightAvg.toFixed(0)} dB</Text>
+                      </View>
+                      <View style={styles.histMetric}>
+                        <Text style={styles.histMetricLabel}>판정</Text>
+                        <Text style={[styles.histMetricValue, { color: C.green }]}>{record.ptaSummary.hearingLevel}</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* 스크리닝 결과 */}
+                  {record.screeningSummary && (
+                    <View>
+                      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 6 }}>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>ADHD</Text>
+                          <Text style={[styles.histMetricValue, {
+                            color: record.screeningSummary.adhdLevel === 'high' ? C.red
+                              : record.screeningSummary.adhdLevel === 'moderate' ? C.orange : C.green
+                          }]}>
+                            {record.screeningSummary.adhdPct.toFixed(0)}%
+                          </Text>
+                        </View>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>난독증</Text>
+                          <Text style={[styles.histMetricValue, {
+                            color: record.screeningSummary.dyslexiaLevel === 'high' ? C.red
+                              : record.screeningSummary.dyslexiaLevel === 'moderate' ? C.orange : C.green
+                          }]}>
+                            {record.screeningSummary.dyslexiaPct.toFixed(0)}%
+                          </Text>
+                        </View>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>RT τ</Text>
+                          <Text style={styles.histMetricValue}>{record.screeningSummary.rtTau.toFixed(0)}ms</Text>
+                        </View>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>GDT</Text>
+                          <Text style={styles.histMetricValue}>{record.screeningSummary.gdt.toFixed(1)}ms</Text>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>DLF 1k</Text>
+                          <Text style={styles.histMetricValue}>{record.screeningSummary.dlf1k.toFixed(1)}%</Text>
+                        </View>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>DLF 6k</Text>
+                          <Text style={styles.histMetricValue}>{record.screeningSummary.dlf6k.toFixed(1)}%</Text>
+                        </View>
+                        <View style={styles.histMetric}>
+                          <Text style={styles.histMetricLabel}>PTA EHF</Text>
+                          <Text style={styles.histMetricValue}>{record.screeningSummary.ptaEHF} dB</Text>
+                        </View>
+                        {record.screeningSummary.ehfFlag && (
+                          <View style={styles.histMetric}>
+                            <Text style={[styles.histMetricLabel, { color: C.orange }]}>⚠ 숨은난청</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          }
+
+          {!historyLoading && testHistory.length === 0 && (
+            <View style={{ alignItems: 'center', padding: 40 }}>
+              <Text style={{ color: C.muted, fontSize: 14 }}>아직 검사 이력이 없습니다.</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ══════ 기기 관리 탭 ══════ */}
+      {activeTab === 'devices' && <>
 
       {/* 통계 */}
       <View style={styles.statsRow}>
@@ -309,6 +510,8 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           onDelete={()  => handleDelete(device.deviceId)}
         />
       ))}
+
+      </>}
     </ScrollView>
   );
 };
@@ -576,4 +779,15 @@ const styles = StyleSheet.create({
   actionRow:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 8 },
   actionBtn:     { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: 'transparent' },
   actionBtnText: { fontSize: 13, fontWeight: '700' },
+
+  // 탭
+  tabBtn:         { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.cardBdr, alignItems: 'center' },
+  tabBtnActive:   { backgroundColor: 'rgba(0,184,212,0.15)', borderColor: C.cyan },
+  tabBtnText:     { color: C.muted, fontSize: 13, fontWeight: '600' },
+  tabBtnTextActive: { color: C.cyan },
+
+  // 검사 이력
+  histMetric:      { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: 6, alignItems: 'center' },
+  histMetricLabel: { fontSize: 9, color: C.muted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  histMetricValue: { fontSize: 14, color: C.white, fontWeight: '700' },
 });
