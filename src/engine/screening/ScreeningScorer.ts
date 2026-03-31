@@ -14,13 +14,16 @@ interface NormEntry { mean: number; std: number; }
 type MetricKey = 'rtTau' | 'fpr' | 'oer' | 'dlf1k' | 'dlf6k' | 'gdt' | 'rtMean' | 'ptaEHF';
 
 const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
+  // 정규값 근거: Kofler et al.(2013) CPT, Moore(2003) DLF, Musiek(2005)/Shinn(2009) GDT
+  // DLF 6kHz > 1kHz: 위상잠금(phase-locking) 불가 대역이므로 변별력이 더 나쁨 (Moore, 2003)
+  // GDT 아동: 정상 아동 ~5ms (Shinn et al., 2009), 이전 8.0ms는 CAPD 수준
   '6-11': {
     rtTau:  { mean: 180, std: 60 },
     fpr:    { mean: 0.12, std: 0.08 },
     oer:    { mean: 0.08, std: 0.06 },
     dlf1k:  { mean: 3.5, std: 1.5 },
-    dlf6k:  { mean: 2.0, std: 1.0 },
-    gdt:    { mean: 8.0, std: 3.0 },
+    dlf6k:  { mean: 6.0, std: 2.5 },   // 1kHz의 ~1.7배 (위상잠금 불가)
+    gdt:    { mean: 5.5, std: 2.5 },   // 8.0→5.5 (Shinn 2009: 정상 아동 ~4.5-5ms)
     rtMean: { mean: 450, std: 80 },
     ptaEHF: { mean: 5, std: 8 },
   },
@@ -28,9 +31,9 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     rtTau:  { mean: 150, std: 50 },
     fpr:    { mean: 0.08, std: 0.06 },
     oer:    { mean: 0.05, std: 0.04 },
-    dlf1k:  { mean: 2.5, std: 1.3 },   // std 1.0→1.3
-    dlf6k:  { mean: 1.5, std: 1.0 },   // std 0.8→1.0
-    gdt:    { mean: 6.0, std: 2.5 },   // std 2.0→2.5
+    dlf1k:  { mean: 2.5, std: 1.3 },
+    dlf6k:  { mean: 4.5, std: 2.0 },   // 1kHz의 ~1.8배
+    gdt:    { mean: 5.0, std: 2.0 },   // 6.0→5.0 (Shinn 2009)
     rtMean: { mean: 380, std: 60 },
     ptaEHF: { mean: 3, std: 6 },
   },
@@ -38,18 +41,18 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     rtTau:  { mean: 120, std: 40 },
     fpr:    { mean: 0.05, std: 0.04 },
     oer:    { mean: 0.03, std: 0.03 },
-    dlf1k:  { mean: 1.5, std: 1.2 },   // std 0.8→1.2 (Z점수 과장 방지)
-    dlf6k:  { mean: 1.0, std: 0.8 },   // std 0.5→0.8
-    gdt:    { mean: 4.5, std: 2.0 },   // std 1.5→2.0
+    dlf1k:  { mean: 1.5, std: 1.2 },
+    dlf6k:  { mean: 3.5, std: 1.5 },   // 1kHz의 ~2.3배 (Moore 2003)
+    gdt:    { mean: 4.5, std: 2.0 },
     rtMean: { mean: 320, std: 50 },
-    ptaEHF: { mean: 2, std: 5 },
+    ptaEHF: { mean: 5, std: 6 },       // 2→5 (실측치 반영)
   },
   '30-49': {
     rtTau:  { mean: 140, std: 45 },
     fpr:    { mean: 0.06, std: 0.05 },
     oer:    { mean: 0.04, std: 0.03 },
-    dlf1k:  { mean: 2.0, std: 1.2 },   // std 1.0→1.2
-    dlf6k:  { mean: 1.2, std: 0.8 },   // std 0.6→0.8
+    dlf1k:  { mean: 2.0, std: 1.2 },
+    dlf6k:  { mean: 4.0, std: 1.8 },   // 1kHz의 2배
     gdt:    { mean: 5.5, std: 2.0 },
     rtMean: { mean: 350, std: 55 },
     ptaEHF: { mean: 8, std: 8 },
@@ -59,7 +62,7 @@ const NORMS: Record<string, Record<MetricKey, NormEntry>> = {
     fpr:    { mean: 0.07, std: 0.05 },
     oer:    { mean: 0.06, std: 0.05 },
     dlf1k:  { mean: 3.0, std: 1.5 },
-    dlf6k:  { mean: 2.0, std: 1.0 },
+    dlf6k:  { mean: 5.5, std: 2.5 },   // 1kHz의 ~1.8배
     gdt:    { mean: 7.0, std: 2.5 },
     rtMean: { mean: 400, std: 70 },
     ptaEHF: { mean: 20, std: 12 },

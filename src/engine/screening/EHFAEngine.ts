@@ -170,10 +170,11 @@ export class EHFAEngine {
   }
 
   private dbHLToAmplitude(dbHL: number, freq: number): number {
+    // ISO 389-5:2006 RETSPL 기반 오프셋 (dB SPL at 0 dB HL)
     const offsets: Record<number, number> = {
-      10000: 17.5,
-      12500: 22.5,
-      16000: 43.5,
+      10000: 22.5,   // ISO 389-5 (~22.5 dB SPL)
+      12500: 28.0,   // ISO 389-5 (~26.6 dB SPL, 마진 포함)
+      16000: 50.0,   // ISO 389-5 (~50.2 dB SPL)
     };
     const offset = offsets[freq] ?? 20;
     const normalized = Math.max(-10, Math.min(120, dbHL + offset));
