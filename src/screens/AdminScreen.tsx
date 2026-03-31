@@ -504,6 +504,7 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         <DeviceCard
           key={device.deviceId}
           device={device}
+          history={testHistory.filter(h => h.deviceId === device.deviceId || h.userName === device.userName)}
           onApprove={() => handleStatus(device.deviceId, 'approved')}
           onBlock={()   => handleStatus(device.deviceId, 'blocked')}
           onPending={()  => handleStatus(device.deviceId, 'pending')}
@@ -519,11 +520,12 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
 // ── 기기 카드 ──────────────────────────────────────────────────────────────
 const DeviceCard: React.FC<{
   device:    DeviceRecord;
+  history:   TestHistoryRecord[];
   onApprove: () => void;
   onBlock:   () => void;
   onPending: () => void;
   onDelete:  () => void;
-}> = ({ device, onApprove, onBlock, onPending, onDelete }) => {
+}> = ({ device, history, onApprove, onBlock, onPending, onDelete }) => {
   const [expanded, setExpanded] = useState(false);
   const col = STATUS_COLOR[device.status];
   const bg  = STATUS_BG[device.status];
@@ -585,6 +587,73 @@ const DeviceCard: React.FC<{
           <Text style={styles.timeText}>✅ 승인: {dateStr(device.approvedAt)}</Text>
         )}
       </View>
+
+      {/* ── 검사 이력 요약 ── */}
+      {history.length > 0 && (() => {
+        const ptaCount = history.filter(h => h.testType === 'pta').length;
+        const scrCount = history.filter(h => h.testType === 'screening').length;
+        const sorted = [...history].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        const lastTest = sorted[0];
+        const lastDate = lastTest ? new Date(lastTest.date) : null;
+        const lastDateStr = lastDate
+          ? `${lastDate.getFullYear()}.${lastDate.getMonth()+1}.${lastDate.getDate()} ${String(lastDate.getHours()).padStart(2,'0')}:${String(lastDate.getMinutes()).padStart(2,'0')}`
+          : '';
+
+        return (
+          <View style={{
+            backgroundColor: 'rgba(0,184,212,0.06)', borderRadius: 10,
+            padding: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(0,184,212,0.15)',
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={{ color: C.cyan, fontSize: 12, fontWeight: '700' }}>📊 검사 이력</Text>
+              <Text style={{ color: C.muted, fontSize: 11, marginLeft: 8 }}>
+                총 {history.length}회
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.cyan }} />
+                <Text style={{ color: C.white, fontSize: 12 }}>순음검사 {ptaCount}회</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#7c4dff' }} />
+                <Text style={{ color: C.white, fontSize: 12 }}>스크리닝 {scrCount}회</Text>
+              </View>
+            </View>
+            {lastTest && (
+              <Text style={{ color: C.muted, fontSize: 10 }}>
+                최근: {lastDateStr} ({lastTest.testType === 'pta' ? '순음검사' : '스크리닝'})
+                {lastTest.ptaSummary && ` — ${lastTest.ptaSummary.hearingLevel}`}
+                {lastTest.screeningSummary && ` — ADHD ${lastTest.screeningSummary.adhdPct.toFixed(0)}% / 난독증 ${lastTest.screeningSummary.dyslexiaPct.toFixed(0)}%`}
+              </Text>
+            )}
+
+            {/* 최근 3건 리스트 */}
+            {sorted.slice(0, 3).map((h, i) => {
+              const dt = new Date(h.date);
+              const ds = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+              return (
+                <View key={h.id || i} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: h.testType === 'pta' ? C.cyan : '#7c4dff' }} />
+                  <Text style={{ color: C.dim, fontSize: 10, width: 80 }}>{ds}</Text>
+                  <Text style={{ color: C.dim, fontSize: 10, flex: 1 }}>
+                    {h.testType === 'pta'
+                      ? `좌 ${h.ptaSummary?.leftAvg.toFixed(0)}dB / 우 ${h.ptaSummary?.rightAvg.toFixed(0)}dB (${h.ptaSummary?.hearingLevel})`
+                      : `ADHD ${h.screeningSummary?.adhdPct.toFixed(0)}% · 난독증 ${h.screeningSummary?.dyslexiaPct.toFixed(0)}%`
+                    }
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        );
+      })()}
+
+      {history.length === 0 && (
+        <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+          <Text style={{ color: C.muted, fontSize: 11, textAlign: 'center' }}>검사 이력 없음</Text>
+        </View>
+      )}
 
       {/* 상세 정보 토글 */}
       <TouchableOpacity style={styles.expandBtn} onPress={() => setExpanded(e => !e)}>
