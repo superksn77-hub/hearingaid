@@ -282,9 +282,19 @@ export class AudiometricEngine {
     });
   }
 
-  /** dB HL → 진폭 (0.001~1.0) · 기준 40 dB HL = 0.10 */
+  /** dB HL → 진폭 (0.001~1.0) · 기준 40 dB HL = 0.10 + 볼륨 캘리브레이션 적용 */
   private dbHLToAmplitude(dbHL: number): number {
-    const amp = 0.10 * Math.pow(10, (dbHL - 40) / 20);
+    let amp = 0.10 * Math.pow(10, (dbHL - 40) / 20);
+    // 저장된 볼륨 캘리브레이션 적용
+    try {
+      const raw = localStorage.getItem('hicog_volume_calibration');
+      if (raw) {
+        const calib = JSON.parse(raw);
+        if (calib.systemGainFactor && Date.now() - calib.timestamp < 24 * 60 * 60 * 1000) {
+          amp *= calib.systemGainFactor;
+        }
+      }
+    } catch {}
     return Math.min(1.0, Math.max(0.001, amp));
   }
 

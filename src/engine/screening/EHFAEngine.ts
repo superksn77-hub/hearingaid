@@ -177,7 +177,17 @@ export class EHFAEngine {
     };
     const offset = offsets[freq] ?? 20;
     const normalized = Math.max(-10, Math.min(120, dbHL + offset));
-    const amp = Math.pow(10, (normalized - 80) / 40) * 0.9;
+    let amp = Math.pow(10, (normalized - 80) / 40) * 0.9;
+    // 저장된 볼륨 캘리브레이션 적용
+    try {
+      const raw = localStorage.getItem('hicog_volume_calibration');
+      if (raw) {
+        const calib = JSON.parse(raw);
+        if (calib.systemGainFactor && Date.now() - calib.timestamp < 24 * 60 * 60 * 1000) {
+          amp *= calib.systemGainFactor;
+        }
+      }
+    } catch {}
     return Math.min(1.0, Math.max(0.001, amp));
   }
 
