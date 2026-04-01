@@ -51,12 +51,12 @@ export default function App() {
         >
           {(props) => <HomeScreen {...props} onGoToGate={goToGate} />}
         </Stack.Screen>
-        <Stack.Screen name="Calibration" component={CalibrationScreen} options={{ title: '볼륨 설정',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white' }} />
-        <Stack.Screen name="Test"        component={TestScreen}        options={{ title: '검사 진행 중',    headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
-        <Stack.Screen name="Result"      component={ResultScreen}      options={{ title: '검사 결과',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white', headerBackVisible: false }} />
-        <Stack.Screen name="ScreeningCalibration" component={ScreeningCalibrationScreen} options={{ title: '하드웨어 보정',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white' }} />
-        <Stack.Screen name="ScreeningTest"        component={ScreeningTestScreen}        options={{ title: '스크리닝 검사',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
-        <Stack.Screen name="ScreeningResult"      component={ScreeningResultScreen}      options={{ title: '스크리닝 결과',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="Calibration" component={CalibrationScreen as any} options={{ title: '볼륨 설정',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white' }} />
+        <Stack.Screen name="Test"        component={TestScreen as any}        options={{ title: '검사 진행 중',    headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="Result"      component={ResultScreen as any}      options={{ title: '검사 결과',       headerStyle: { backgroundColor: '#1a237e' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="ScreeningCalibration" component={ScreeningCalibrationScreen as any} options={{ title: '하드웨어 보정',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white' }} />
+        <Stack.Screen name="ScreeningTest"        component={ScreeningTestScreen as any}        options={{ title: '스크리닝 검사',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
+        <Stack.Screen name="ScreeningResult"      component={ScreeningResultScreen as any}      options={{ title: '스크리닝 결과',      headerStyle: { backgroundColor: '#0d1b2a' }, headerTintColor: 'white', headerBackVisible: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
