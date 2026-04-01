@@ -152,7 +152,7 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
       const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url;
-      a.download = `HICOG_스크리닝_${new Date().toISOString().slice(0,10)}.html`;
+      a.download = `HICOG_청각스크린검사_${new Date().toISOString().slice(0,10)}.html`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { console.warn('PDF export error:', e); }
@@ -162,7 +162,7 @@ export const ScreeningResultScreen: React.FC<Props> = ({ navigation, route }) =>
     <ScrollView style={s.scroll} contentContainerStyle={s.content}>
       {/* 헤더 */}
       <View style={s.header}>
-        <Text style={s.headerTitle}>ADHD / 난독증 스크리닝 결과</Text>
+        <Text style={s.headerTitle}>HICOG 청각 스크린 검사 결과</Text>
         {user?.name && <Text style={s.headerSub}>{user.name} ({user.age}세, {user.gender === 'male' ? '남' : user.gender === 'female' ? '여' : '기타'})</Text>}
         <Text style={s.headerDate}>{new Date(result.date).toLocaleDateString('ko-KR')}</Text>
       </View>
@@ -643,7 +643,7 @@ function buildScreeningPdfHtml(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HICOG ADHD/난독증 스크리닝 보고서</title>
+<title>HICOG 청각 스크린 검사 보고서</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -748,7 +748,7 @@ function buildScreeningPdfHtml(
   <div class="h-inner">
     <div class="h-logo">
       <div class="h-logo-icon">&#x1F9E0;</div>
-      <h1>ADHD / 난독증 스크리닝 보고서</h1>
+      <h1>HICOG 청각 스크린 검사 보고서</h1>
     </div>
     <div class="h-sub">HICOG Pure-Tone Audiometry Based Cognitive-Auditory Screening Report</div>
     <div class="h-meta">

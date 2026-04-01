@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "HICOG 청력검사",
+    "name": "HICOG 청각 스크린 검사",
     "slug": "hearingaid",
     "version": "1.0.0",
     "orientation": "portrait",

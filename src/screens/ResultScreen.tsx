@@ -893,7 +893,7 @@ function buildPrintHtml(result: TestResult): string {
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>HICOG 청력검사 결과지</title>
+<title>HICOG 청각 스크린 검사 결과지</title>
 <style>
   @page { size: A4; margin: 20mm; }
   body { font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; color: #1a1a1a; font-size: 12px; }
@@ -928,7 +928,7 @@ function buildPrintHtml(result: TestResult): string {
 
   <div class="header">
     <div>
-      <div class="logo">HICOG 청력검사</div>
+      <div class="logo">HICOG 청각 스크린 검사</div>
       <div class="sub-logo">Mobile Pure-Tone Audiometry System</div>
     </div>
     <div class="meta">
@@ -1106,7 +1106,7 @@ export const ResultScreen: React.FC<Props> = ({ navigation, route }) => {
     try {
       const dateStr = new Date().toLocaleDateString('ko-KR')
         .replace(/\.\s*/g, '-').replace(/-$/, '');
-      const filename = `HICOG_청력검사_${dateStr}.html`;
+      const filename = `HICOG_청각스크린검사_${dateStr}.html`;
       const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');

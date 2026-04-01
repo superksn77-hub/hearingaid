@@ -108,7 +108,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
           <View style={styles.earDot} />
         </View>
 
-        <Text style={styles.heroTitle}>HICOG 청력검사</Text>
+        <Text style={styles.heroTitle}>HICOG 청각 스크린 검사</Text>
         <Text style={styles.heroSubtitle}>Pure-Tone Audiometry System</Text>
 
         <View style={styles.versionBadge}>
@@ -257,7 +257,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation, onGoToGate }) => {
             {testMode === 'screening' && <View style={styles.modeRadioDot} />}
           </View>
           <View style={styles.modeInfo}>
-            <Text style={[styles.modeTitle, testMode === 'screening' && styles.modeTitleActive]}>ADHD / 난독증 스크리닝</Text>
+            <Text style={[styles.modeTitle, testMode === 'screening' && styles.modeTitleActive]}>HICOG 청각 스크린 검사</Text>
             <Text style={styles.modeDesc}>주의력(CPT) + 주파수 변별(DLF) + 간격 탐지(GDT) + 확장 고주파(EHFA) (약 13분)</Text>
           </View>
         </TouchableOpacity>

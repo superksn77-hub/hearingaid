@@ -151,7 +151,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
     return (
       <View style={styles.centerContainer}>
         <Logo />
-        <Text style={styles.logoText}>HICOG 청력검사</Text>
+        <Text style={styles.logoText}>HICOG 청각 스크린 검사</Text>
         <ActivityIndicator size="large" color={C.cyan} style={{ marginTop: 32 }} />
         <Text style={styles.loadingText}>
           {gateState === 'loading' ? '기기 식별 중...' : '접근 권한 확인 중...'}
@@ -166,7 +166,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
       <ScrollView style={styles.scrollBg} contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Logo />
-          <Text style={styles.logoText}>HICOG 청력검사</Text>
+          <Text style={styles.logoText}>HICOG 청각 스크린 검사</Text>
           <Text style={styles.logoSub}>기기 인증 시스템</Text>
         </View>
 
@@ -240,7 +240,7 @@ export const DeviceGateScreen: React.FC<Props> = ({ onApproved, onAdminOpen }) =
 
       <View style={styles.header}>
         <Logo />
-        <Text style={styles.logoText}>HICOG 청력검사</Text>
+        <Text style={styles.logoText}>HICOG 청각 스크린 검사</Text>
         <Text style={styles.logoSub}>기기 인증 시스템</Text>
       </View>
 

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hearingaid",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "npx expo start --web"],
+      "port": 8081,
+      "autoPort": false
+    }
+  ]
+}

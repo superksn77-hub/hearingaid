@@ -172,7 +172,7 @@ export const ScreeningTestScreen: React.FC<Props> = ({ navigation, route }) => {
     return (
       <View style={s.container}>
         <View style={s.introCard}>
-          <Text style={s.title}>ADHD / 난독증 스크리닝</Text>
+          <Text style={s.title}>HICOG 청각 스크린 검사</Text>
           <Text style={s.desc}>
             4단계 검사가 순차적으로 진행됩니다:{'\n\n'}
             1. 확장 고주파 청력검사 (~3분){'\n'}
