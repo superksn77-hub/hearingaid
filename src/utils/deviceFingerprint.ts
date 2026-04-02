@@ -1,13 +1,9 @@
 /**
- * 기기 고유 번호 (Device Fingerprint) v9
+ * 기기 고유 번호 (Device Fingerprint) v10
  *
  * 전략:
- *  1) 하드웨어 신호 + 기기별 고유 salt → SHA-256 → 고유 ID 생성
- *     - 하드웨어 신호: CPU, 화면, GPU, 오디오, 메모리 등
- *     - 고유 salt: 기기 최초 접속 시 랜덤 생성 → localStorage/cookie에 영구 저장
- *     - 동일 기종(같은 폰 모델 등)이라도 salt가 다르므로 절대 겹치지 않음
- *
- *  2) 로컬 캐시는 성능 최적화용 (매번 재계산 방지)
+ *  PC: 하드웨어 신호만으로 ID 생성 → 같은 PC면 어떤 브라우저든 동일 ID
+ *  모바일: 하드웨어 신호 + 고유 salt → 같은 폰 모델이라도 개별 기기마다 다른 ID
  *
  * 사용하는 신호:
  *   - navigator.hardwareConcurrency (CPU 코어 수)
@@ -19,7 +15,7 @@
  *   - window.devicePixelRatio (디스플레이 DPI)
  *   - WebGL UNMASKED_RENDERER (GPU 모델)
  *   - navigator.deviceMemory (RAM)
- *   - 기기별 고유 salt (UUID, 최초 1회 생성 후 영구 저장)
+ *   - [모바일 전용] 기기별 고유 salt (UUID, 최초 1회 생성 후 영구 저장)
  *
  * 결과 포맷: XXXX-XXXX-XXXX-XXXX (대문자 hex)
  */
@@ -55,8 +51,16 @@ function getGPURenderer(): string {
   } catch { return 'no-webgl'; }
 }
 
+// ── 모바일 기기 판별 ─────────────────────────────────────────────────────
+// PC: salt 없이 하드웨어 신호만 → 브라우저 달라도 같은 ID
+// 모바일: salt 포함 → 같은 모델이라도 개별 기기마다 다른 ID
+function isMobileDevice(): boolean {
+  const ua = navigator.userAgent;
+  return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+}
+
 // ── 기기별 고유 salt (최초 1회 랜덤 생성, 이후 영구 재사용) ─────────────
-// 동일 기종(같은 폰 모델)이라도 salt가 다르므로 ID가 절대 겹치지 않음
+// 모바일 전용: 동일 기종(같은 폰 모델)이라도 salt가 다르므로 ID가 절대 겹치지 않음
 const SALT_KEY = 'hicog_device_salt_v9';
 const SALT_COOKIE = 'hicog_ds9';
 
@@ -144,14 +148,24 @@ function collectHardwareSignals(): string {
   // 9) RAM (모바일에서 기기별로 다를 수 있음)
   const ram = (navigator as any).deviceMemory ?? 0;
 
-  // 10) 기기별 고유 salt — 동일 하드웨어라도 겹치지 않게 보장
-  const salt = getOrCreateDeviceSalt();
-
-  const raw = [
+  const parts = [
     cpu, tz, audioRate, audioChannels, colorDepth, touch,
-    screenW, screenH, dpr, gpu, ram, salt
-  ].join('|');
-  console.log('[FP] 하드웨어+salt 신호:', raw.replace(salt, salt.slice(0, 6) + '...'));
+    screenW, screenH, dpr, gpu, ram
+  ];
+
+  // 10) 모바일 전용 salt — 같은 폰 모델이라도 겹치지 않게 보장
+  //     PC에서는 salt 없이 하드웨어만 사용 → 브라우저 달라도 동일 ID
+  const mobile = isMobileDevice();
+  if (mobile) {
+    const salt = getOrCreateDeviceSalt();
+    parts.push(salt);
+    console.log('[FP] 모바일 기기 감지 — salt 포함');
+  } else {
+    console.log('[FP] PC 감지 — 하드웨어 신호만 사용 (브라우저 무관 동일 ID)');
+  }
+
+  const raw = parts.join('|');
+  console.log('[FP] 신호:', mobile ? raw.replace(parts[parts.length - 1], parts[parts.length - 1].slice(0, 6) + '...') : raw);
   return raw;
 }
 
@@ -171,8 +185,8 @@ async function generateIdFromHardware(): Promise<string> {
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v9';
-const COOKIE_KEY = 'hicog_fp9';
+const CACHE_KEY = 'hicog_hwfp_v10';
+const COOKIE_KEY = 'hicog_fp10';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -209,12 +223,13 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v6');
     localStorage.removeItem('hicog_hwfp_v7');
     localStorage.removeItem('hicog_hwfp_v8');
+    localStorage.removeItem('hicog_hwfp_v9');
     localStorage.removeItem('hicog_salt_v1');
     localStorage.removeItem('hicog_salt_v2');
   } catch {}
   try {
     const del = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6','hicog_fp7','hicog_fp8']) {
+    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6','hicog_fp7','hicog_fp8','hicog_fp9']) {
       document.cookie = `${k}=; ${del}`;
     }
   } catch {}
