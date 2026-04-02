@@ -1,25 +1,25 @@
 /**
- * 기기 고유 번호 (Device Fingerprint) v4
+ * 기기 고유 번호 (Device Fingerprint) v9
  *
  * 전략:
- *  1) 하드웨어 신호 조합 → SHA-256 → 결정론적 ID 생성
- *     - 같은 PC면 어떤 브라우저에서든 동일한 ID
- *     - 다른 PC와 겹치지 않도록 충분한 신호 조합
+ *  1) 하드웨어 신호 + 기기별 고유 salt → SHA-256 → 고유 ID 생성
+ *     - 하드웨어 신호: CPU, 화면, GPU, 오디오, 메모리 등
+ *     - 고유 salt: 기기 최초 접속 시 랜덤 생성 → localStorage/cookie에 영구 저장
+ *     - 동일 기종(같은 폰 모델 등)이라도 salt가 다르므로 절대 겹치지 않음
  *
- *  2) 생성된 ID를 Firebase에 서버 백업
- *     - 브라우저 데이터를 전부 삭제해도 서버에서 복원
- *     - 하드웨어 해시(짧은 버전)로 서버 조회
+ *  2) 로컬 캐시는 성능 최적화용 (매번 재계산 방지)
  *
- *  3) 로컬 캐시는 성능 최적화용 (매번 재계산 방지)
- *
- * 사용하는 하드웨어 신호 (모두 브라우저 무관):
- *   - screen.width / height / colorDepth (모니터)
+ * 사용하는 신호:
  *   - navigator.hardwareConcurrency (CPU 코어 수)
  *   - Intl timezone (OS 타임존)
- *   - AudioContext.sampleRate (오디오 하드웨어)
- *   - AudioContext.destination.maxChannelCount (오디오 채널)
+ *   - AudioContext.sampleRate / maxChannelCount (오디오 하드웨어)
+ *   - screen.colorDepth (색상 깊이)
  *   - navigator.maxTouchPoints (터치 하드웨어)
+ *   - screen.width / height (화면 해상도)
  *   - window.devicePixelRatio (디스플레이 DPI)
+ *   - WebGL UNMASKED_RENDERER (GPU 모델)
+ *   - navigator.deviceMemory (RAM)
+ *   - 기기별 고유 salt (UUID, 최초 1회 생성 후 영구 저장)
  *
  * 결과 포맷: XXXX-XXXX-XXXX-XXXX (대문자 hex)
  */
@@ -42,26 +42,80 @@ async function sha256(text: string): Promise<string> {
   return (h >>> 0).toString(16).padStart(8, '0').repeat(8);
 }
 
-// ── 오디오 하드웨어 정보 (브라우저 무관) ─────────────────────────────────
-function getAudioHardwareInfo(): string {
+// ── GPU 렌더러 정보 (기기마다 다를 수 있음) ──────────────────────────────
+function getGPURenderer(): string {
   try {
-    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const info = `${ac.sampleRate}|${ac.destination.maxChannelCount}`;
-    ac.close();
-    return info;
-  } catch { return '0|0'; }
+    const c = document.createElement('canvas');
+    const gl = (c.getContext('webgl') ??
+                c.getContext('experimental-webgl')) as WebGLRenderingContext | null;
+    if (!gl) return 'no-webgl';
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    if (ext) return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+    return String(gl.getParameter(gl.RENDERER));
+  } catch { return 'no-webgl'; }
 }
 
-// ── 하드웨어 신호 수집 (100% 브라우저 무관, 100% 결정론적) ───────────────
-// Firebase 불필요, 랜덤 salt 불필요 — 같은 PC = 같은 ID
+// ── 기기별 고유 salt (최초 1회 랜덤 생성, 이후 영구 재사용) ─────────────
+// 동일 기종(같은 폰 모델)이라도 salt가 다르므로 ID가 절대 겹치지 않음
+const SALT_KEY = 'hicog_device_salt_v9';
+const SALT_COOKIE = 'hicog_ds9';
+
+function getOrCreateDeviceSalt(): string {
+  // 1) localStorage에서 읽기
+  try {
+    const v = localStorage.getItem(SALT_KEY);
+    if (v && v.length >= 32) return v;
+  } catch {}
+
+  // 2) cookie에서 읽기
+  try {
+    const m = document.cookie.match(new RegExp(`${SALT_COOKIE}=([a-f0-9]{32,})`));
+    if (m) {
+      // localStorage에도 복원
+      try { localStorage.setItem(SALT_KEY, m[1]); } catch {}
+      return m[1];
+    }
+  } catch {}
+
+  // 3) 새로 생성 (crypto.randomUUID 또는 fallback)
+  let salt: string;
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      salt = crypto.randomUUID().replace(/-/g, '');
+    } else {
+      // fallback: crypto.getRandomValues
+      const arr = new Uint8Array(16);
+      crypto.getRandomValues(arr);
+      salt = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {
+    // 최후 fallback
+    salt = Date.now().toString(36) + Math.random().toString(36).slice(2) +
+           Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    salt = salt.slice(0, 32);
+  }
+
+  // 저장
+  try { localStorage.setItem(SALT_KEY, salt); } catch {}
+  try {
+    const exp = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${SALT_COOKIE}=${salt}; expires=${exp}; path=/; SameSite=Lax`;
+  } catch {}
+  try { navigator.storage?.persist?.(); } catch {}
+
+  console.log('[FP] 새 기기 salt 생성됨');
+  return salt;
+}
+
+// ── 하드웨어 신호 + 고유 salt 수집 ──────────────────────────────────────
 function collectHardwareSignals(): string {
-  // 1) CPU 코어 수 (하드웨어 고정)
+  // 1) CPU 코어 수
   const cpu = navigator.hardwareConcurrency ?? 0;
 
   // 2) OS 타임존
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // 3) 오디오 하드웨어 (사운드카드 고유, 브라우저 무관)
+  // 3) 오디오 하드웨어
   let audioRate = 0;
   let audioChannels = 0;
   try {
@@ -71,14 +125,33 @@ function collectHardwareSignals(): string {
     ac.close();
   } catch {}
 
-  // 4) 색상 깊이 (OS 디스플레이 설정, 브라우저 무관)
+  // 4) 색상 깊이
   const colorDepth = screen.colorDepth;
 
-  // 5) 터치 포인트 (하드웨어 고정)
+  // 5) 터치 포인트
   const touch = navigator.maxTouchPoints ?? 0;
 
-  const raw = [cpu, tz, audioRate, audioChannels, colorDepth, touch].join('|');
-  console.log('[FP] 하드웨어 신호:', raw);
+  // 6) 화면 해상도 (같은 모델이라도 설정이 다를 수 있음)
+  const screenW = screen.width ?? 0;
+  const screenH = screen.height ?? 0;
+
+  // 7) 디스플레이 DPI 비율
+  const dpr = window.devicePixelRatio ?? 1;
+
+  // 8) GPU 렌더러
+  const gpu = getGPURenderer();
+
+  // 9) RAM (모바일에서 기기별로 다를 수 있음)
+  const ram = (navigator as any).deviceMemory ?? 0;
+
+  // 10) 기기별 고유 salt — 동일 하드웨어라도 겹치지 않게 보장
+  const salt = getOrCreateDeviceSalt();
+
+  const raw = [
+    cpu, tz, audioRate, audioChannels, colorDepth, touch,
+    screenW, screenH, dpr, gpu, ram, salt
+  ].join('|');
+  console.log('[FP] 하드웨어+salt 신호:', raw.replace(salt, salt.slice(0, 6) + '...'));
   return raw;
 }
 
@@ -94,14 +167,12 @@ async function generateIdFromHardware(): Promise<string> {
 // Firebase 서버 백업 (브라우저 데이터 삭제해도 복원 가능)
 // ══════════════════════════════════════════════════════════════════════════
 
-// Firebase 불필요 — 순수 하드웨어 결정론적 방식
-
 // ══════════════════════════════════════════════════════════════════════════
 // 로컬 캐시 (성능 최적화용)
 // ══════════════════════════════════════════════════════════════════════════
 
-const CACHE_KEY = 'hicog_hwfp_v8';
-const COOKIE_KEY = 'hicog_fp8';
+const CACHE_KEY = 'hicog_hwfp_v9';
+const COOKIE_KEY = 'hicog_fp9';
 const FP_REGEX = /^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/;
 
 function readLocalCache(): string | null {
@@ -137,12 +208,13 @@ function cleanupOldCaches(): void {
     localStorage.removeItem('hicog_hwfp_v5');
     localStorage.removeItem('hicog_hwfp_v6');
     localStorage.removeItem('hicog_hwfp_v7');
+    localStorage.removeItem('hicog_hwfp_v8');
     localStorage.removeItem('hicog_salt_v1');
     localStorage.removeItem('hicog_salt_v2');
   } catch {}
   try {
     const del = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6','hicog_fp7']) {
+    for (const k of ['hicog_fp','hicog_fp2','hicog_fp3','hicog_fp4','hicog_fp5','hicog_fp6','hicog_fp7','hicog_fp8']) {
       document.cookie = `${k}=; ${del}`;
     }
   } catch {}
@@ -160,8 +232,9 @@ function cleanupOldCaches(): void {
  *
  * 조회 순서:
  *  1) 로컬 캐시 (가장 빠름)
- *  2) Firebase 서버 (하드웨어키로 조회 — 브라우저 데이터 삭제 후 복원)
- *  3) 하드웨어 신호로 새로 생성 → 로컬 + 서버 모두 저장
+ *  2) 하드웨어 신호 + 기기별 고유 salt로 새로 생성
+ *     - salt는 기기 최초 접속 시 랜덤 생성되어 영구 저장
+ *     - 동일 기종이라도 절대 겹치지 않음
  */
 export async function generateDeviceFingerprint(): Promise<string> {
   if (typeof document === 'undefined') {
