@@ -7,8 +7,8 @@ import {
   ScrollView, ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import {
-  getAllDevices, setDeviceStatus, deleteDevice,
-  DeviceRecord, DeviceStatus, getBackendMode,
+  getAllDevices, setAppStatus, deleteDevice, getAppStatus,
+  DeviceRecord, DeviceStatus, AppName, getBackendMode,
 } from '../services/deviceLicense';
 import { ADMIN_PASSWORD, IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
 import { getAllTestHistory, deleteTestHistory, TestHistoryRecord } from '../services/testHistoryService';
@@ -63,6 +63,21 @@ const SEARCH_FIELD_LABELS: Record<SearchField, string> = {
 };
 
 type AdminTab = 'devices' | 'history';
+
+// 이 기기에 등록된 앱 목록 (apps[] + appStatus 키 + 구버전 appName 모두 고려)
+const appsOf = (d: DeviceRecord): string[] => {
+  const set = new Set<string>();
+  if (Array.isArray(d.apps)) d.apps.forEach(a => set.add(a));
+  if (d.appStatus) Object.keys(d.appStatus).forEach(a => set.add(a));
+  if (d.appName) set.add(d.appName);
+  if (set.size === 0) set.add('hearingaid'); // 구버전 레코드 기본값
+  return Array.from(set);
+};
+
+const APP_META: Record<string, { label: string; color: string; bg: string }> = {
+  hearingaid: { label: '🎧 청각앱',        color: '#00b8d4', bg: 'rgba(0,184,212,0.12)' },
+  wmemory:    { label: '🧠 Working Memory', color: '#7c4dff', bg: 'rgba(124,77,255,0.12)' },
+};
 
 export const AdminScreen: React.FC<Props> = ({ onClose }) => {
   const [phase,       setPhase]       = useState<'login' | 'panel'>('login');
@@ -132,10 +147,22 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     }
   }, []);
 
-  const handleStatus = async (deviceId: string, status: DeviceStatus) => {
+  const handleAppStatus = async (deviceId: string, appName: AppName, status: DeviceStatus) => {
     try {
-      await setDeviceStatus(deviceId, status);
-      setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, status } : d));
+      await setAppStatus(deviceId, appName, status);
+      setDevices(prev => prev.map(d => {
+        if (d.deviceId !== deviceId) return d;
+        const apps = Array.isArray(d.apps) ? [...d.apps] : [];
+        if (!apps.includes(appName)) apps.push(appName);
+        return {
+          ...d,
+          apps,
+          appStatus: { ...(d.appStatus || {}), [appName]: status },
+          appApprovedAt: status === 'approved'
+            ? { ...(d.appApprovedAt || {}), [appName]: new Date().toISOString() }
+            : d.appApprovedAt,
+        };
+      }));
     } catch {
       showAlert('오류', '상태 변경에 실패했습니다.');
     }
@@ -190,15 +217,19 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     }
   };
 
+  // 기기의 앱별 상태 중 하나라도 조건을 만족하는지
+  const hasAnyStatus = (d: DeviceRecord, s: DeviceStatus): boolean =>
+    appsOf(d).some(app => getAppStatus(d, app) === s);
+
   const filtered = devices
-    .filter(d => filter === 'all' || d.status === filter)
+    .filter(d => filter === 'all' || hasAnyStatus(d, filter as DeviceStatus))
     .filter(matchesSearch);
 
   const counts = {
     all:      devices.length,
-    pending:  devices.filter(d => d.status === 'pending').length,
-    approved: devices.filter(d => d.status === 'approved').length,
-    blocked:  devices.filter(d => d.status === 'blocked').length,
+    pending:  devices.filter(d => hasAnyStatus(d, 'pending')).length,
+    approved: devices.filter(d => hasAnyStatus(d, 'approved')).length,
+    blocked:  devices.filter(d => hasAnyStatus(d, 'blocked')).length,
   };
 
   // ── 로그인 화면 ────────────────────────────────────────────────────────
@@ -505,9 +536,7 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
           key={device.deviceId}
           device={device}
           history={testHistory.filter(h => h.deviceId === device.deviceId || h.userName === device.userName)}
-          onApprove={() => handleStatus(device.deviceId, 'approved')}
-          onBlock={()   => handleStatus(device.deviceId, 'blocked')}
-          onPending={()  => handleStatus(device.deviceId, 'pending')}
+          onSetApp={(app, status) => handleAppStatus(device.deviceId, app, status)}
           onDelete={()  => handleDelete(device.deviceId)}
         />
       ))}
@@ -521,14 +550,21 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
 const DeviceCard: React.FC<{
   device:    DeviceRecord;
   history:   TestHistoryRecord[];
-  onApprove: () => void;
-  onBlock:   () => void;
-  onPending: () => void;
+  onSetApp:  (appName: AppName, status: DeviceStatus) => void;
   onDelete:  () => void;
-}> = ({ device, history, onApprove, onBlock, onPending, onDelete }) => {
+}> = ({ device, history, onSetApp, onDelete }) => {
   const [expanded, setExpanded] = useState(false);
-  const col = STATUS_COLOR[device.status];
-  const bg  = STATUS_BG[device.status];
+
+  // 기기 전체 레벨 상태 = 등록된 앱 중 하나라도 approved면 일부 승인,
+  // 모두 approved면 전체 승인, 아니면 가장 보수적인 상태로 표시 (차단>대기>승인)
+  const apps = appsOf(device);
+  const appStatuses = apps.map(a => getAppStatus(device, a) || 'pending');
+  const anyBlocked  = appStatuses.some(s => s === 'blocked');
+  const anyPending  = appStatuses.some(s => s === 'pending');
+  const allApproved = appStatuses.every(s => s === 'approved');
+  const overall: DeviceStatus = anyBlocked ? 'blocked' : anyPending ? 'pending' : allApproved ? 'approved' : 'pending';
+  const col = STATUS_COLOR[overall];
+  const bg  = STATUS_BG[overall];
 
   const dateStr = (ts: any): string => {
     if (!ts) return '-';
@@ -547,12 +583,28 @@ const DeviceCard: React.FC<{
   return (
     <View style={[styles.deviceCard, { borderLeftColor: col }]}>
 
-      {/* 상태 배지 + 기기 ID */}
+      {/* 기기 고유번호 (강조) + 삭제 버튼 */}
       <View style={styles.deviceHeader}>
         <View style={[styles.statusBadge, { backgroundColor: bg, borderColor: col }]}>
-          <Text style={[styles.statusBadgeText, { color: col }]}>{STATUS_LABEL[device.status]}</Text>
+          <Text style={[styles.statusBadgeText, { color: col }]}>{STATUS_LABEL[overall]}</Text>
         </View>
-        <Text style={styles.deviceIdText} selectable>{device.deviceId}</Text>
+        <Text
+          selectable
+          style={{
+            flex: 1, marginLeft: 10,
+            color: C.white, fontSize: 15, fontWeight: '700',
+            fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+            letterSpacing: 0.5,
+          }}
+        >
+          {device.deviceId}
+        </Text>
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: '#1a0a0a', paddingHorizontal: 10, paddingVertical: 6 }]}
+          onPress={onDelete}
+        >
+          <Text style={[styles.actionBtnText, { color: '#78909c', fontSize: 11 }]}>🗑 삭제</Text>
+        </TouchableOpacity>
       </View>
 
       {/* 사용자 이름 + 기기 종류 */}
@@ -580,11 +632,13 @@ const DeviceCard: React.FC<{
         } />
       </View>
 
-      {/* 등록/승인 시각 */}
+      {/* 최초 등록 시각 + 등록자 */}
       <View style={styles.timeRow}>
-        <Text style={styles.timeText}>📅 등록: {dateStr(device.registeredAt)}</Text>
-        {device.approvedAt && (
-          <Text style={styles.timeText}>✅ 승인: {dateStr(device.approvedAt)}</Text>
+        <Text style={styles.timeText}>📅 최초 등록: {dateStr(device.registeredAt)}</Text>
+        {device.registeredBy && (
+          <Text style={styles.timeText}>
+            · {APP_META[device.registeredBy]?.label ?? device.registeredBy}에서 등록
+          </Text>
         )}
       </View>
 
@@ -668,30 +722,64 @@ const DeviceCard: React.FC<{
         </View>
       )}
 
-      {/* 액션 버튼 */}
-      <View style={styles.actionRow}>
-        {device.status !== 'approved' && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#0d3320' }]} onPress={onApprove}>
-            <Text style={[styles.actionBtnText, { color: C.green }]}>✓ 승인</Text>
-          </TouchableOpacity>
-        )}
-        {device.status !== 'blocked' && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: C.redBg }]} onPress={onBlock}>
-            <Text style={[styles.actionBtnText, { color: C.red }]}>✕ 차단</Text>
-          </TouchableOpacity>
-        )}
-        {device.status !== 'pending' && (
-          <TouchableOpacity style={[styles.actionBtn, { backgroundColor: C.orangeBg }]} onPress={onPending}>
-            <Text style={[styles.actionBtnText, { color: C.orange }]}>↩ 대기</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#1a0a0a' }]} onPress={onDelete}>
-          <Text style={[styles.actionBtnText, { color: '#78909c' }]}>🗑 삭제</Text>
-        </TouchableOpacity>
+      {/* ── 앱별 승인/대기/차단 토글 ── */}
+      <View style={{ marginTop: 4 }}>
+        <Text style={{ color: C.muted, fontSize: 11, marginBottom: 6, fontWeight: '600' }}>
+          📦 프로그램별 승인 상태
+        </Text>
+        {apps.map(app => {
+          const meta = APP_META[app] ?? { label: app, color: C.muted, bg: 'rgba(255,255,255,0.05)' };
+          const cur = getAppStatus(device, app) || 'pending';
+          const approvedAt = device.appApprovedAt && device.appApprovedAt[app];
+          return (
+            <View key={app} style={{
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: meta.bg,
+              borderWidth: 1, borderColor: meta.color,
+              borderRadius: 10, padding: 10, marginBottom: 6, gap: 8, flexWrap: 'wrap',
+            }}>
+              <Text style={{ color: meta.color, fontWeight: '700', fontSize: 13, minWidth: 140 }}>
+                {meta.label}
+              </Text>
+              <View style={{
+                paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6,
+                backgroundColor: STATUS_BG[cur], borderWidth: 1, borderColor: STATUS_COLOR[cur],
+              }}>
+                <Text style={{ color: STATUS_COLOR[cur], fontSize: 10, fontWeight: '700' }}>
+                  {STATUS_LABEL[cur]}
+                </Text>
+              </View>
+              {approvedAt && cur === 'approved' && (
+                <Text style={{ color: C.muted, fontSize: 9 }}>승인: {dateStr(approvedAt)}</Text>
+              )}
+              <View style={{ flexDirection: 'row', gap: 4, marginLeft: 'auto' }}>
+                <AppToggleBtn active={cur === 'approved'} label="✓" color={C.green}  bg="#0d3320"   onPress={() => onSetApp(app, 'approved')} />
+                <AppToggleBtn active={cur === 'pending'}  label="⏳" color={C.orange} bg={C.orangeBg} onPress={() => onSetApp(app, 'pending')} />
+                <AppToggleBtn active={cur === 'blocked'}  label="🚫" color={C.red}    bg={C.redBg}    onPress={() => onSetApp(app, 'blocked')} />
+              </View>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
 };
+
+const AppToggleBtn: React.FC<{
+  active: boolean; label: string; color: string; bg: string; onPress: () => void;
+}> = ({ active, label, color, bg, onPress }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    style={{
+      paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+      backgroundColor: active ? bg : 'transparent',
+      borderWidth: 1.5, borderColor: active ? color : 'rgba(255,255,255,0.12)',
+      opacity: active ? 1 : 0.55,
+    }}
+  >
+    <Text style={{ color: active ? color : C.muted, fontSize: 12, fontWeight: '700' }}>{label}</Text>
+  </TouchableOpacity>
+);
 
 // ── 서브 컴포넌트 ─────────────────────────────────────────────────────────
 const InfoChip: React.FC<{ icon: string; label: string; value: string }> = ({ icon, label, value }) => (

@@ -12,7 +12,7 @@ import { collectDeviceInfo, DeviceInfo } from '../utils/deviceFingerprint';
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore, doc, getDoc, setDoc, getDocs, updateDoc, deleteDoc,
-  collection, serverTimestamp, Firestore,
+  collection, serverTimestamp, arrayUnion, Firestore,
 } from 'firebase/firestore';
 
 // ── Firebase 싱글톤 ──────────────────────────────────────────────────────
@@ -35,13 +35,27 @@ function getDb(): Firestore | null {
 // ── 타입 정의 ─────────────────────────────────────────────────────────────
 export type DeviceStatus = 'pending' | 'approved' | 'blocked';
 
+export type AppName = string; // 'hearingaid' | 'wmemory' | 향후 추가 앱
+
+export type AppStatusMap = Record<AppName, DeviceStatus>;
+export type AppTimestampMap = Record<AppName, any>;
+
 export interface DeviceRecord {
   deviceId:     string;
-  status:       DeviceStatus;
-  label:        string;
+  /** @deprecated 구버전 레코드 호환용. 새 코드는 appStatus를 사용. */
+  status?:      DeviceStatus;
+  label?:       string;
   userName?:    string;
+  registeredBy?: AppName;
   registeredAt: any;
+  /** @deprecated 구버전. 새 코드는 appApprovedAt 사용. */
   approvedAt?:  any;
+
+  // 앱별 승인 상태 맵 — 고유 기기 ID(하나의 DeviceRecord)에 대해
+  // 여러 앱이 각각 독립적으로 pending/approved/blocked 상태를 가짐
+  appStatus?:        AppStatusMap;
+  appRegisteredAt?:  AppTimestampMap;
+  appApprovedAt?:    AppTimestampMap;
 
   // ── 상세 기기 정보 ──
   deviceType?:   string;   // PC / 스마트폰 / 태블릿
@@ -55,6 +69,14 @@ export interface DeviceRecord {
   timezone?:     string;   // Asia/Seoul
   touchSupport?: boolean;
   userAgent?:    string;
+
+  // 이 기기에서 등록된 앱 목록 (예: ['hearingaid'], ['hearingaid','wmemory']).
+  // 두 앱이 동일 Firestore 'devices' 컬렉션과 동일 기기 ID를 공유하며,
+  // 한 번의 승인으로 두 앱 모두 사용 가능하도록 기기 단위로 통합 관리한다.
+  apps?:         string[];
+
+  // 하위호환: 구버전 레코드에서 사용하던 필드. 새 레코드는 apps[]를 사용.
+  appName?:      string;
 }
 
 // ── localStorage 폴백 ────────────────────────────────────────────────────
@@ -78,19 +100,35 @@ function localWrite(data: Record<string, DeviceRecord>): void {
 
 // ── 공개 API ──────────────────────────────────────────────────────────────
 
-/** 기기 승인 상태 조회 */
+/** 이 앱의 이름 (checkDeviceStatus 기본값) */
+const MY_APP: AppName = 'hearingaid';
+
+/**
+ * 이 기기에 대한 특정 앱의 상태를 꺼낸다.
+ * 최신 스키마: rec.appStatus[appName]
+ * 구버전 폴백: rec.apps[]에 appName이 포함되어 있으면 top-level status 사용
+ */
+export function getAppStatus(rec: DeviceRecord | undefined, appName: AppName = MY_APP): DeviceStatus | null {
+  if (!rec) return null;
+  if (rec.appStatus && rec.appStatus[appName]) return rec.appStatus[appName];
+  const apps: string[] = Array.isArray(rec.apps) ? rec.apps : (rec.appName ? [rec.appName] : []);
+  if (apps.includes(appName) && rec.status) return rec.status;
+  return null;
+}
+
+/** 기기 승인 상태 조회 (이 앱 기준) */
 export async function checkDeviceStatus(deviceId: string): Promise<DeviceStatus | null> {
   const db = getDb();
   if (db) {
     try {
       const snap = await getDoc(doc(db, 'devices', deviceId));
       if (!snap.exists()) return null;
-      return (snap.data() as DeviceRecord).status;
+      return getAppStatus(snap.data() as DeviceRecord, MY_APP);
     } catch (e) {
       console.error('[Firebase] checkDeviceStatus 오류:', e);
     }
   }
-  return localRead()[deviceId]?.status ?? null;
+  return getAppStatus(localRead()[deviceId], MY_APP);
 }
 
 /** 기기 정보만 최신으로 업데이트 (상태/이름 변경 없음) */
@@ -133,12 +171,12 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
     }
   } catch (_) {}
 
+  const nowIso = new Date().toISOString();
   const record: DeviceRecord = {
     deviceId,
-    status:       'pending',
-    label:        '',
     userName:     userName ?? '',
-    registeredAt: new Date().toISOString(),
+    registeredBy: MY_APP,
+    registeredAt: nowIso,
     // 상세 정보
     deviceType:   info.deviceType,
     os:           info.os,
@@ -151,6 +189,9 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
     timezone:     info.timezone,
     touchSupport: info.touchSupport,
     userAgent:    info.userAgent,
+    apps:         [MY_APP],
+    appStatus:       { [MY_APP]: 'pending' },
+    appRegisteredAt: { [MY_APP]: nowIso },
   };
 
   const db = getDb();
@@ -159,12 +200,24 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
       const ref  = doc(db, 'devices', deviceId);
       const snap = await getDoc(ref);
       if (!snap.exists()) {
-        await setDoc(ref, { ...record, registeredAt: serverTimestamp() });
+        // 최초 등록
+        await setDoc(ref, {
+          ...record,
+          registeredAt: serverTimestamp(),
+          apps: arrayUnion(MY_APP),
+        });
       } else {
-        // 이미 등록된 경우 이름 + 최신 기기 정보 업데이트
-        const update: Partial<DeviceRecord> = { ...info };
+        // 이미 등록된 경우: 정보만 갱신 + apps에 'hearingaid' 추가.
+        // 이 앱이 아직 appStatus에 없을 때만 pending으로 추가 (기존 승인 상태 보존).
+        const data = snap.data() as DeviceRecord;
+        const alreadyHasAppStatus = !!(data.appStatus && data.appStatus[MY_APP]);
+        const update: Record<string, any> = { ...info, apps: arrayUnion(MY_APP) };
         if (userName) update.userName = userName;
-        await updateDoc(ref, update as any);
+        if (!alreadyHasAppStatus) {
+          update['appStatus.' + MY_APP]       = 'pending';
+          update['appRegisteredAt.' + MY_APP] = nowIso;
+        }
+        await updateDoc(ref, update);
       }
       return;
     } catch (e) {
@@ -178,6 +231,17 @@ export async function registerDevice(deviceId: string, userName?: string): Promi
   } else {
     Object.assign(local[deviceId], info);
     if (userName) local[deviceId].userName = userName;
+    const apps = Array.isArray(local[deviceId].apps) ? local[deviceId].apps : [];
+    if (!apps.includes(MY_APP)) apps.push(MY_APP);
+    local[deviceId].apps = apps;
+    const appStatus = local[deviceId].appStatus || {};
+    if (!appStatus[MY_APP]) {
+      appStatus[MY_APP] = 'pending';
+      const appReg = local[deviceId].appRegisteredAt || {};
+      appReg[MY_APP] = nowIso;
+      local[deviceId].appRegisteredAt = appReg;
+    }
+    local[deviceId].appStatus = appStatus;
   }
   localWrite(local);
 }
@@ -224,7 +288,51 @@ export async function checkNameExists(
   });
 }
 
-/** 기기 상태 변경 (관리자용) */
+/**
+ * 특정 앱의 상태만 변경 (관리자용) — 기기 ID는 유지하면서
+ * 그 기기에 대한 하나의 앱만 승인/대기/차단 전환.
+ */
+export async function setAppStatus(
+  deviceId: string,
+  appName:  AppName,
+  status:   DeviceStatus,
+): Promise<void> {
+  const db = getDb();
+  if (db) {
+    try {
+      const update: Record<string, any> = {
+        ['appStatus.' + appName]: status,
+        apps: arrayUnion(appName), // 앱 관리 대상임을 명시
+      };
+      if (status === 'approved') {
+        update['appApprovedAt.' + appName] = serverTimestamp();
+      }
+      await updateDoc(doc(db, 'devices', deviceId), update);
+      return;
+    } catch (e) {
+      console.error('[Firebase] setAppStatus 오류:', e);
+    }
+  }
+
+  const local = localRead();
+  if (local[deviceId]) {
+    const r = local[deviceId];
+    const appStatus = r.appStatus || {};
+    appStatus[appName] = status;
+    r.appStatus = appStatus;
+    const apps: string[] = Array.isArray(r.apps) ? r.apps : [];
+    if (!apps.includes(appName)) apps.push(appName);
+    r.apps = apps;
+    if (status === 'approved') {
+      const appApp = r.appApprovedAt || {};
+      appApp[appName] = new Date().toISOString();
+      r.appApprovedAt = appApp;
+    }
+    localWrite(local);
+  }
+}
+
+/** @deprecated setAppStatus를 사용할 것. 구버전 호환용으로 유지. */
 export async function setDeviceStatus(
   deviceId: string,
   status:   DeviceStatus,
