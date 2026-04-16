@@ -1,7 +1,7 @@
 /**
  * AdminScreen – 기기 인증 관리자 패널
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, ActivityIndicator, Alert, Platform,
@@ -10,8 +10,13 @@ import {
   getAllDevices, setAppStatus, deleteDevice, getAppStatus,
   DeviceRecord, DeviceStatus, AppName, getBackendMode,
 } from '../services/deviceLicense';
-import { ADMIN_PASSWORD, IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
+import { IS_FIREBASE_CONFIGURED } from '../config/firebaseConfig';
 import { getAllTestHistory, deleteTestHistory, TestHistoryRecord } from '../services/testHistoryService';
+import {
+  verifyAdminPassword, isLockedOut, getLockoutRemainingMs,
+  isAdminSessionValid, clearAdminSession, touchAdminSession,
+} from '../utils/adminAuth';
+import { changeAdminPassword } from '../services/adminConfig';
 
 interface Props {
   onClose: () => void;
@@ -75,9 +80,27 @@ const appsOf = (d: DeviceRecord): string[] => {
 };
 
 const APP_META: Record<string, { label: string; color: string; bg: string }> = {
-  hearingaid: { label: '🎧 청각앱',        color: '#00b8d4', bg: 'rgba(0,184,212,0.12)' },
-  wmemory:    { label: '🧠 Working Memory', color: '#7c4dff', bg: 'rgba(124,77,255,0.12)' },
+  hearingaid:  { label: '🎧 청각앱',        color: '#00b8d4', bg: 'rgba(0,184,212,0.12)' },
+  wmemory:     { label: '🧠 Working Memory', color: '#7c4dff', bg: 'rgba(124,77,255,0.12)' },
+  smartswitch: { label: '🔀 스위칭마스터',    color: '#ff8a65', bg: 'rgba(255,138,101,0.12)' },
 };
+
+// 같은 물리 기기로 추정되는 레코드를 묶기 위한 linkKey — device-auth.js는 건드리지 않고
+// Firebase에 이미 저장된 정보 필드만으로 계산
+function computeLinkKey(d: DeviceRecord): string | null {
+  const parts = [
+    d.cpuCores ?? '',
+    d.ramGB ?? '',
+    d.screenRes ?? '',
+    d.timezone ?? '',
+    d.os ?? '',
+    d.gpu ?? '',
+  ];
+  // 너무 비어있으면 grouping에 사용하지 않음
+  const nonEmpty = parts.filter(p => p !== '' && p !== 0 && p != null);
+  if (nonEmpty.length < 4) return null;
+  return parts.join('|');
+}
 
 export const AdminScreen: React.FC<Props> = ({ onClose }) => {
   const [phase,       setPhase]       = useState<'login' | 'panel'>('login');
@@ -91,6 +114,43 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
 
   // 탭 상태
   const [activeTab, setActiveTab] = useState<AdminTab>('devices');
+
+  // 비밀번호 변경 모달
+  const [showPwChange, setShowPwChange] = useState(false);
+  const [pwCurrent,    setPwCurrent]    = useState('');
+  const [pwNew,        setPwNew]        = useState('');
+  const [pwConfirm,    setPwConfirm]    = useState('');
+  const [pwMsg,        setPwMsg]        = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [pwBusy,       setPwBusy]       = useState(false);
+
+  const handleChangePassword = async () => {
+    setPwMsg(null);
+    if (!pwCurrent || !pwNew || !pwConfirm) {
+      setPwMsg({ type: 'err', text: '모든 필드를 입력하세요.' });
+      return;
+    }
+    if (pwNew !== pwConfirm) {
+      setPwMsg({ type: 'err', text: '새 비밀번호 확인이 일치하지 않습니다.' });
+      return;
+    }
+    if (pwNew === pwCurrent) {
+      setPwMsg({ type: 'err', text: '새 비밀번호는 현재와 달라야 합니다.' });
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const res = await changeAdminPassword({ currentPlain: pwCurrent, newPlain: pwNew });
+      if (res.ok) {
+        setPwMsg({ type: 'ok', text: '✓ 변경되었습니다. 다음 로그인부터 새 비번을 사용하세요.' });
+        setPwCurrent(''); setPwNew(''); setPwConfirm('');
+        setTimeout(() => { setShowPwChange(false); setPwMsg(null); }, 2000);
+      } else {
+        setPwMsg({ type: 'err', text: res.reason });
+      }
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   // 검사 이력 상태
   const [testHistory, setTestHistory] = useState<TestHistoryRecord[]>([]);
@@ -118,12 +178,22 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     setTestHistory(prev => prev.filter(r => r.id !== id));
   };
 
-  const handleLogin = () => {
-    if (pw === ADMIN_PASSWORD) {
+  const handleLogin = async () => {
+    if (isLockedOut()) {
+      const sec = Math.ceil(getLockoutRemainingMs() / 1000);
+      setPwError(`너무 많은 시도로 ${sec}초간 잠겼습니다.`);
+      return;
+    }
+    const res = await verifyAdminPassword(pw);
+    if (res.ok) {
       setPwError('');
+      setPw('');
       setPhase('panel');
       loadDevices();
       loadHistory();
+    } else if (res.reason === 'LOCKED') {
+      const sec = Math.ceil((res.remainingMs ?? 0) / 1000);
+      setPwError(`너무 많은 시도로 ${sec}초간 잠겼습니다.`);
     } else {
       setPwError('비밀번호가 올바르지 않습니다.');
       setPw('');
@@ -217,6 +287,19 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
     }
   };
 
+  // linkKey별로 같은 물리 기기로 추정되는 레코드들을 인덱싱
+  const linkGroups = useMemo(() => {
+    const map = new Map<string, DeviceRecord[]>();
+    devices.forEach(d => {
+      const key = computeLinkKey(d);
+      if (!key) return;
+      const arr = map.get(key) || [];
+      arr.push(d);
+      map.set(key, arr);
+    });
+    return map;
+  }, [devices]);
+
   // 기기의 앱별 상태 중 하나라도 조건을 만족하는지
   const hasAnyStatus = (d: DeviceRecord, s: DeviceStatus): boolean =>
     appsOf(d).some(app => getAppStatus(d, app) === s);
@@ -279,6 +362,12 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         <View style={styles.topBarRight}>
           <TouchableOpacity style={styles.refreshBtn} onPress={() => { loadDevices(); loadHistory(); }}>
             <Text style={styles.refreshBtnText}>↻ 새로고침</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.refreshBtn, { borderColor: C.orange }]}
+            onPress={() => { setShowPwChange(true); setPwMsg(null); }}
+          >
+            <Text style={[styles.refreshBtnText, { color: C.orange }]}>🔐 비번 변경</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
             <Text style={styles.closeBtnText}>✕</Text>
@@ -531,28 +620,141 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
         </View>
       )}
 
-      {filtered.map(device => (
-        <DeviceCard
-          key={device.deviceId}
-          device={device}
-          history={testHistory.filter(h => h.deviceId === device.deviceId || h.userName === device.userName)}
-          onSetApp={(app, status) => handleAppStatus(device.deviceId, app, status)}
-          onDelete={()  => handleDelete(device.deviceId)}
-        />
-      ))}
+      {filtered.map(device => {
+        const key = computeLinkKey(device);
+        const siblings = key
+          ? (linkGroups.get(key) || []).filter(d => d.deviceId !== device.deviceId)
+          : [];
+        return (
+          <DeviceCard
+            key={device.deviceId}
+            device={device}
+            linkedDevices={siblings}
+            history={testHistory.filter(h => h.deviceId === device.deviceId || h.userName === device.userName)}
+            onSetApp={(app, status) => handleAppStatus(device.deviceId, app, status)}
+            onDelete={()  => handleDelete(device.deviceId)}
+          />
+        );
+      })}
 
       </>}
+
+      {/* ── 비밀번호 변경 모달 ── */}
+      {showPwChange && (
+        <View style={pwStyles.overlay}>
+          <View style={pwStyles.modal}>
+            <Text style={pwStyles.title}>🔐 관리자 비밀번호 변경</Text>
+            <Text style={pwStyles.desc}>
+              새 비밀번호는 최소 8자, 문자+숫자 포함이어야 합니다.
+            </Text>
+
+            <Text style={pwStyles.label}>현재 비밀번호</Text>
+            <TextInput
+              style={pwStyles.input}
+              secureTextEntry
+              value={pwCurrent}
+              onChangeText={setPwCurrent}
+              placeholder="현재 비밀번호"
+              placeholderTextColor={C.muted}
+              autoComplete="current-password"
+            />
+
+            <Text style={pwStyles.label}>새 비밀번호</Text>
+            <TextInput
+              style={pwStyles.input}
+              secureTextEntry
+              value={pwNew}
+              onChangeText={setPwNew}
+              placeholder="새 비밀번호 (8자 이상, 문자+숫자)"
+              placeholderTextColor={C.muted}
+              autoComplete="new-password"
+            />
+
+            <Text style={pwStyles.label}>새 비밀번호 확인</Text>
+            <TextInput
+              style={pwStyles.input}
+              secureTextEntry
+              value={pwConfirm}
+              onChangeText={setPwConfirm}
+              placeholder="새 비밀번호 확인"
+              placeholderTextColor={C.muted}
+              autoComplete="new-password"
+              onSubmitEditing={handleChangePassword}
+            />
+
+            {pwMsg && (
+              <Text style={[
+                pwStyles.msg,
+                { color: pwMsg.type === 'ok' ? C.green : C.red },
+              ]}>
+                {pwMsg.text}
+              </Text>
+            )}
+
+            <View style={pwStyles.btnRow}>
+              <TouchableOpacity
+                style={[pwStyles.btn, pwStyles.btnCancel]}
+                onPress={() => {
+                  setShowPwChange(false);
+                  setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(null);
+                }}
+                disabled={pwBusy}
+              >
+                <Text style={pwStyles.btnCancelText}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[pwStyles.btn, pwStyles.btnOk, pwBusy && { opacity: 0.5 }]}
+                onPress={handleChangePassword}
+                disabled={pwBusy}
+              >
+                <Text style={pwStyles.btnOkText}>{pwBusy ? '변경 중...' : '변경'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 };
 
+const pwStyles = StyleSheet.create({
+  overlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center', alignItems: 'center',
+    zIndex: 1000,
+    padding: 16,
+  },
+  modal: {
+    width: '100%', maxWidth: 420,
+    backgroundColor: C.card, borderColor: C.cardBdr, borderWidth: 1,
+    borderRadius: 12, padding: 20,
+  },
+  title: { color: C.white, fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  desc: { color: C.muted, fontSize: 12, marginBottom: 14 },
+  label: { color: C.white, fontSize: 13, marginBottom: 4, marginTop: 8 },
+  input: {
+    backgroundColor: C.input, borderColor: C.cardBdr, borderWidth: 1,
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
+    color: C.white, fontSize: 14,
+  },
+  msg: { fontSize: 13, marginTop: 12, textAlign: 'center' },
+  btnRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  btnCancel: { backgroundColor: 'transparent', borderWidth: 1, borderColor: C.cardBdr },
+  btnCancelText: { color: C.muted, fontWeight: '600' },
+  btnOk: { backgroundColor: C.cyan },
+  btnOkText: { color: '#001018', fontWeight: '700' },
+});
+
 // ── 기기 카드 ──────────────────────────────────────────────────────────────
 const DeviceCard: React.FC<{
-  device:    DeviceRecord;
-  history:   TestHistoryRecord[];
-  onSetApp:  (appName: AppName, status: DeviceStatus) => void;
-  onDelete:  () => void;
-}> = ({ device, history, onSetApp, onDelete }) => {
+  device:         DeviceRecord;
+  linkedDevices:  DeviceRecord[];
+  history:        TestHistoryRecord[];
+  onSetApp:       (appName: AppName, status: DeviceStatus) => void;
+  onDelete:       () => void;
+}> = ({ device, linkedDevices, history, onSetApp, onDelete }) => {
   const [expanded, setExpanded] = useState(false);
 
   // 기기 전체 레벨 상태 = 등록된 앱 중 하나라도 approved면 일부 승인,
@@ -719,6 +921,42 @@ const DeviceCard: React.FC<{
           <DetailRow label="GPU"      value={device.gpu ?? '-'} />
           <DetailRow label="터치 지원" value={device.touchSupport ? '✅ 지원' : '❌ 미지원'} />
           <DetailRow label="User-Agent" value={device.userAgent ?? '-'} mono />
+        </View>
+      )}
+
+      {/* ── 동일 하드웨어로 추정되는 다른 레코드 ── */}
+      {linkedDevices.length > 0 && (
+        <View style={{
+          marginTop: 4, marginBottom: 8, padding: 10, borderRadius: 10,
+          backgroundColor: 'rgba(255,193,7,0.08)', borderWidth: 1, borderColor: 'rgba(255,193,7,0.3)',
+        }}>
+          <Text style={{ color: '#ffc107', fontSize: 11, fontWeight: '700', marginBottom: 6 }}>
+            🔗 같은 하드웨어로 추정 ({linkedDevices.length}개 연결)
+          </Text>
+          {linkedDevices.map(ld => {
+            const ldApps = appsOf(ld);
+            return (
+              <View key={ld.deviceId} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                <Text style={{ color: C.muted, fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+                  {ld.deviceId}
+                </Text>
+                {ld.userName ? (
+                  <Text style={{ color: C.white, fontSize: 11 }}>· 👤 {ld.userName}</Text>
+                ) : null}
+                {ldApps.map(app => {
+                  const m = APP_META[app] ?? { label: app, color: C.muted, bg: 'rgba(255,255,255,0.05)' };
+                  return (
+                    <View key={app} style={{
+                      paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
+                      backgroundColor: m.bg, borderWidth: 1, borderColor: m.color,
+                    }}>
+                      <Text style={{ color: m.color, fontSize: 9, fontWeight: '700' }}>{m.label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })}
         </View>
       )}
 
