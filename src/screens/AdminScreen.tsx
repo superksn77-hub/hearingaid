@@ -632,7 +632,9 @@ export const AdminScreen: React.FC<Props> = ({ onClose }) => {
             linkedDevices={siblings}
             history={testHistory.filter(h => h.deviceId === device.deviceId || h.userName === device.userName)}
             onSetApp={(app, status) => handleAppStatus(device.deviceId, app, status)}
+            onSetAppForDevice={handleAppStatus}
             onDelete={()  => handleDelete(device.deviceId)}
+            onDeleteDevice={handleDelete}
           />
         );
       })}
@@ -749,12 +751,14 @@ const pwStyles = StyleSheet.create({
 
 // ── 기기 카드 ──────────────────────────────────────────────────────────────
 const DeviceCard: React.FC<{
-  device:         DeviceRecord;
-  linkedDevices:  DeviceRecord[];
-  history:        TestHistoryRecord[];
-  onSetApp:       (appName: AppName, status: DeviceStatus) => void;
-  onDelete:       () => void;
-}> = ({ device, linkedDevices, history, onSetApp, onDelete }) => {
+  device:             DeviceRecord;
+  linkedDevices:      DeviceRecord[];
+  history:            TestHistoryRecord[];
+  onSetApp:           (appName: AppName, status: DeviceStatus) => void;
+  onSetAppForDevice:  (deviceId: string, appName: AppName, status: DeviceStatus) => void;
+  onDelete:           () => void;
+  onDeleteDevice:     (deviceId: string) => void;
+}> = ({ device, linkedDevices, history, onSetApp, onSetAppForDevice, onDelete, onDeleteDevice }) => {
   const [expanded, setExpanded] = useState(false);
 
   // 기기 전체 레벨 상태 = 등록된 앱 중 하나라도 approved면 일부 승인,
@@ -924,33 +928,69 @@ const DeviceCard: React.FC<{
         </View>
       )}
 
-      {/* ── 동일 하드웨어로 추정되는 다른 레코드 ── */}
+      {/* ── 동일 하드웨어로 추정되는 다른 레코드 (각 앱별 승인/대기/차단 가능) ── */}
       {linkedDevices.length > 0 && (
         <View style={{
           marginTop: 4, marginBottom: 8, padding: 10, borderRadius: 10,
           backgroundColor: 'rgba(255,193,7,0.08)', borderWidth: 1, borderColor: 'rgba(255,193,7,0.3)',
         }}>
           <Text style={{ color: '#ffc107', fontSize: 11, fontWeight: '700', marginBottom: 6 }}>
-            🔗 같은 하드웨어로 추정 ({linkedDevices.length}개 연결)
+            🔗 같은 하드웨어로 추정 ({linkedDevices.length}개 연결) — 각 앱을 개별 승인/차단 가능
           </Text>
           {linkedDevices.map(ld => {
             const ldApps = appsOf(ld);
             return (
-              <View key={ld.deviceId} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-                <Text style={{ color: C.muted, fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
-                  {ld.deviceId}
-                </Text>
-                {ld.userName ? (
-                  <Text style={{ color: C.white, fontSize: 11 }}>· 👤 {ld.userName}</Text>
-                ) : null}
+              <View key={ld.deviceId} style={{
+                backgroundColor: 'rgba(255,255,255,0.03)',
+                borderWidth: 1, borderColor: 'rgba(255,193,7,0.2)',
+                borderRadius: 8, padding: 8, marginBottom: 6,
+              }}>
+                {/* 헤더: 기기 ID + 사용자 + 기기 삭제 */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <Text selectable style={{
+                    color: C.white, fontSize: 11, fontWeight: '700',
+                    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+                  }}>
+                    {ld.deviceId}
+                  </Text>
+                  {ld.userName ? (
+                    <Text style={{ color: C.muted, fontSize: 11 }}>· 👤 {ld.userName}</Text>
+                  ) : null}
+                  <TouchableOpacity
+                    onPress={() => onDeleteDevice(ld.deviceId)}
+                    style={{
+                      marginLeft: 'auto', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+                      backgroundColor: '#1a0a0a',
+                    }}
+                  >
+                    <Text style={{ color: '#78909c', fontSize: 10, fontWeight: '700' }}>🗑</Text>
+                  </TouchableOpacity>
+                </View>
+                {/* 앱별 상태 + 토글 */}
                 {ldApps.map(app => {
                   const m = APP_META[app] ?? { label: app, color: C.muted, bg: 'rgba(255,255,255,0.05)' };
+                  const cur = (getAppStatus(ld, app) || 'pending') as DeviceStatus;
                   return (
                     <View key={app} style={{
-                      paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
+                      flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                      paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6,
                       backgroundColor: m.bg, borderWidth: 1, borderColor: m.color,
+                      marginTop: 4,
                     }}>
-                      <Text style={{ color: m.color, fontSize: 9, fontWeight: '700' }}>{m.label}</Text>
+                      <Text style={{ color: m.color, fontSize: 11, fontWeight: '700' }}>{m.label}</Text>
+                      <View style={{
+                        paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
+                        backgroundColor: STATUS_BG[cur], borderWidth: 1, borderColor: STATUS_COLOR[cur],
+                      }}>
+                        <Text style={{ color: STATUS_COLOR[cur], fontSize: 9, fontWeight: '700' }}>
+                          {STATUS_LABEL[cur]}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 3, marginLeft: 'auto' }}>
+                        <AppToggleBtn active={cur === 'approved'} label="✓"  color={C.green}  bg="#0d3320"     onPress={() => onSetAppForDevice(ld.deviceId, app, 'approved')} />
+                        <AppToggleBtn active={cur === 'pending'}  label="⏳" color={C.orange} bg={C.orangeBg}  onPress={() => onSetAppForDevice(ld.deviceId, app, 'pending')} />
+                        <AppToggleBtn active={cur === 'blocked'}  label="🚫" color={C.red}    bg={C.redBg}     onPress={() => onSetAppForDevice(ld.deviceId, app, 'blocked')} />
+                      </View>
                     </View>
                   );
                 })}
