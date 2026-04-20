@@ -1,0 +1,86 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── 유틸 ─────────────────────────────────────────────
+    function isValidDeviceId(id) {
+      return id is string && id.size() >= 4 && id.size() <= 256;
+    }
+
+    function isSha256Hex(s) {
+      return s is string && s.size() == 64 && s.matches('^[a-f0-9]{64}$');
+    }
+
+    // ── devices ──────────────────────────────────────────
+    // 읽기/목록 허용. 쓰기는 deviceId 형식 검증 + 자기 승인 금지.
+    match /devices/{deviceId} {
+      allow get, list: if true;
+
+      // 최초 등록 — appStatus가 있으면 'pending'으로만 등록 가능 (자기 승인 방지)
+      allow create: if isValidDeviceId(deviceId)
+                    && (
+                         !('appStatus' in request.resource.data)
+                         || request.resource.data.appStatus.values().hasOnly(['pending'])
+                       )
+                    && (
+                         !('status' in request.resource.data)
+                         || request.resource.data.status == 'pending'
+                       );
+
+      // 업데이트 — deviceId 형식만 검증 (관리자 액션 + 기기정보 갱신 모두 허용)
+      allow update: if isValidDeviceId(deviceId);
+
+      // 삭제 — 관리자 UI 에서 호출
+      allow delete: if isValidDeviceId(deviceId);
+
+      // ── clients 서브컬렉션 (Working Memory 클라이언트 백업) ──
+      // 기기 단위로 클라이언트/세션 데이터를 클라우드 백업.
+      // 상위 devices/{deviceId}와 동일한 신뢰 모델을 따름
+      // (deviceId를 아는 것 자체가 접근 권한 — 현행 디자인과 일치)
+      match /clients/{clientId} {
+        allow read, list: if isValidDeviceId(deviceId);
+        allow create, update, delete:
+          if isValidDeviceId(deviceId)
+          && clientId is string
+          && clientId.size() >= 1 && clientId.size() <= 256;
+      }
+    }
+
+    // ── 검사 이력 (testHistory) ──────────────────────────
+    // 이력 읽기/쓰기 허용 (데이터 구조가 자유로우므로 문서 경로로만 제한)
+    match /testHistory/{docId} {
+      allow read, write: if docId is string && docId.size() <= 256;
+    }
+
+    // ── 관리자 설정 (비번 해시) ──────────────────────────
+    // hashhash = SHA256(SHA256(plain))
+    // 업데이트 시 현재 비번의 1차 해시(proof)를 rules가 검증.
+    match /admin_config/{docId} {
+      allow read: if docId == 'main';
+      allow list: if false;
+
+      // 최초 부트스트랩
+      allow create: if docId == 'main'
+                    && request.resource.data.keys().hasOnly(['hashhash', 'updatedAt', 'version'])
+                    && isSha256Hex(request.resource.data.hashhash);
+
+      // 업데이트 — proof(=h1) 로 현재 비번 소유 증명
+      allow update: if docId == 'main'
+                    && request.resource.data.keys().hasOnly(['hashhash', 'proof', 'updatedAt', 'version'])
+                    && isSha256Hex(request.resource.data.hashhash)
+                    && isSha256Hex(request.resource.data.proof)
+                    && hashing.sha256(request.resource.data.proof).toHexString().lower()
+                         == resource.data.hashhash
+                    && request.resource.data.version is int
+                    && request.resource.data.version == (resource.data.get('version', 1) + 1);
+
+      allow delete: if false;
+    }
+
+    // 기본 거부
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
